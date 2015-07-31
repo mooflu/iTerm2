@@ -8,6 +8,7 @@
 
 #import "iTermBadgeLabel.h"
 #import "DebugLogging.h"
+#import "iTermAdvancedSettingsModel.h"
 
 @interface iTermBadgeLabel()
 @property(nonatomic, retain) NSImage *image;
@@ -157,11 +158,22 @@
 }
 
 - (CGFloat)idealPointSize {
+    CGFloat min = 4;
+    CGFloat max = 100;
+
+    NSString *defaultBadgeSize = [iTermAdvancedSettingsModel badgeSize];
+    if( ! [defaultBadgeSize isEqualToString: @"auto"] )
+    {
+        int defaultPoints = [defaultBadgeSize intValue];
+        if( defaultPoints > min )
+        {
+            return defaultPoints;
+        }
+    }
+
     NSSize maxSize = self.maxSize;
 
     // Perform a binary search for the point size that best fits |maxSize|.
-    CGFloat min = 4;
-    CGFloat max = 100;
     int points = (min + max) / 2;
     int prevPoints = -1;
     NSSize sizeWithFont = NSZeroSize;

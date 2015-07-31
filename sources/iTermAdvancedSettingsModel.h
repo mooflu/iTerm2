@@ -17,6 +17,7 @@
 + (BOOL)alternateMouseScroll;
 + (BOOL)traditionalVisualBell;
 + (double)hotkeyTermAnimationDuration;
++ (NSString *)badgeSize;
 + (NSString *)searchCommand;
 + (double)antiIdleTimerPeriod;
 + (BOOL)dockIconTogglesWindow;
