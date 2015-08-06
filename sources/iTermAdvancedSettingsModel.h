@@ -93,7 +93,6 @@
 + (int)maximumBytesToProvideToServices;
 
 + (BOOL)disableWindowSizeSnap;
-+ (BOOL)useDoubleBufferedGrid;
 + (BOOL)eliminateCloseButtons;
 
 + (BOOL)runJobsInServers;
