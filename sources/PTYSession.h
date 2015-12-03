@@ -4,10 +4,10 @@
 #import "FindViewController.h"
 #import "iTermFileDescriptorClient.h"
 #import "ITAddressBookMgr.h"
+#import "iTermPopupWindowController.h"
 #import "LineBuffer.h"
 #import "PTYTask.h"
 #import "PTYTextView.h"
-#import "Popup.h"
 #import "ProfileModel.h"
 #import "TextViewWrapper.h"
 #import "TmuxController.h"
@@ -37,8 +37,10 @@ extern NSString *const kPTYSessionCapturedOutputDidChange;
 @class VT100Screen;
 @class VT100Terminal;
 @class iTermColorMap;
+@class iTermCommandHistoryCommandUseMO;
 @class iTermController;
 @class iTermGrowlDelegate;
+@class iTermQuickLookController;
 
 // The time period for just blinking is in -[iTermAdvancedSettingsModel timeBetweenBlinks].
 // Timer period when receiving lots of data.
@@ -50,11 +52,11 @@ static const float kFastTimerIntervalSec = 1.0 / 30.0;
 // TODO(georgen): There's room for improvement here.
 static const float kBackgroundSessionIntervalSec = 1;
 
-typedef enum {
+typedef NS_ENUM(NSInteger, SplitSelectionMode) {
     kSplitSelectionModeOn,
     kSplitSelectionModeOff,
     kSplitSelectionModeCancel
-} SplitSelectionMode;
+};
 
 typedef enum {
     TMUX_NONE,
@@ -192,6 +194,7 @@ typedef enum {
 @property(nonatomic, assign) float transparency;
 @property(nonatomic, assign) float blend;
 @property(nonatomic, assign) BOOL useBoldFont;
+@property(nonatomic, assign) BOOL thinStrokes;
 @property(nonatomic, assign) BOOL useItalicFont;
 
 @property(nonatomic, readonly) BOOL logging;
@@ -207,7 +210,8 @@ typedef enum {
 
 // Has this session's bookmark been divorced from the profile in the ProfileModel? Changes
 // in this bookmark may happen indepentendly of the persistent bookmark.
-@property(nonatomic, readonly) BOOL isDivorced;
+// You should usually not assign to this; instead use divorceAddressBookEntryFromPreferences.
+@property(nonatomic, assign) BOOL isDivorced;
 
 @property(nonatomic, readonly) NSString *jobName;
 
@@ -289,7 +293,10 @@ typedef enum {
 // layout changes due to a user-initiated pane split.
 @property(nonatomic, assign) BOOL sessionIsSeniorToTmuxSplitPane;
 
-@property(nonatomic, readonly) NSArray *commandUses;
+@property(nonatomic, readonly) NSArray<iTermCommandHistoryCommandUseMO *> *commandUses;
+
+// If we want to show quicklook this will not be nil.
+@property(nonatomic, readonly) iTermQuickLookController *quickLookController;
 
 #pragma mark - methods
 
@@ -486,9 +493,7 @@ typedef enum {
 - (BOOL)isCompatibleWith:(PTYSession *)otherSession;
 - (void)setTmuxPane:(int)windowPane;
 
-- (void)toggleShowTimestamps;
 - (void)addNoteAtCursor;
-- (void)showHideNotes;
 - (void)previousMarkOrNote;
 - (void)nextMarkOrNote;
 - (void)scrollToMark:(id<iTermMark>)mark;
@@ -504,7 +509,6 @@ typedef enum {
 
 - (void)addCapturedOutput:(CapturedOutput *)capturedOutput;
 
-- (void)dismissAnnouncementWithIdentifier:(NSString *)identifier;
 - (void)queueAnnouncement:(iTermAnnouncementViewController *)announcement
                identifier:(NSString *)identifier;
 

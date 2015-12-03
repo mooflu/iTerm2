@@ -44,7 +44,7 @@
 // Serialized state, but excludes screen contents.
 @property(nonatomic, readonly) NSDictionary *dictionaryValue;
 
-- (id)initWithSize:(VT100GridSize)size delegate:(id<VT100GridDelegate>)delegate;
+- (instancetype)initWithSize:(VT100GridSize)size delegate:(id<VT100GridDelegate>)delegate;
 
 - (screen_char_t *)screenCharsAtLineNumber:(int)lineNumber;
 
@@ -68,6 +68,9 @@
 // Returns the count of lines excluding totally empty lines at the bottom, and always including the
 // line the cursor is on.
 - (int)numberOfLinesUsed;
+
+// Like numberOfLinesUsed, but it doesn't care about where the cursor is.
+- (int)numberOfNonEmptyLines;
 
 // Append the first numLines to the given line buffer. Returns the number of lines appended.
 - (int)appendLines:(int)numLines
@@ -189,6 +192,9 @@
 
 // Returns a human-readable string with the screen contents and dirty lines interspersed.
 - (NSString *)debugString;
+
+// Returns a string for the character at |coord|.
+- (NSString *)stringForCharacterAt:(VT100GridCoord)coord;
 
 // Converts a run into one or more VT100GridRect NSValues.
 - (NSArray *)rectsForRun:(VT100GridRun)run;

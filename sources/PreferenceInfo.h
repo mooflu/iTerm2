@@ -8,8 +8,9 @@
 
 #import <Cocoa/Cocoa.h>
 
-typedef enum {
+typedef NS_ENUM(NSInteger, PreferenceInfoType) {
     kPreferenceInfoTypeCheckbox,
+    kPreferenceInfoTypeInvertedCheckbox,  // true=checked, false=unchecked. Handy when inverting a checkbox's text, but the user defaults key can't be changed.
     kPreferenceInfoTypeIntegerTextField,
     kPreferenceInfoTypeStringTextField,
     kPreferenceInfoTypePopup,
@@ -17,7 +18,7 @@ typedef enum {
     kPreferenceInfoTypeTokenField,
     kPreferenceInfoTypeMatrix,
     kPreferenceInfoTypeColorWell,
-} PreferenceInfoType;
+};
 
 
 @interface PreferenceInfo : NSObject

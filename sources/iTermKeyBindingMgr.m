@@ -76,6 +76,7 @@
 #import "iTermPasteSpecialViewController.h"
 #import "iTermPreferences.h"
 #import "HotkeyWindowController.h"
+#import "PTYTextView.h"   // For selection movement units
 #import <Carbon/Carbon.h>
 
 static NSDictionary* globalKeyMap;
@@ -427,6 +428,9 @@ static NSString *const kFactoryDefaultsGlobalPreset = @"Factory Defaults";
         case KEY_ACTION_TOGGLE_HOTKEY_WINDOW_PINNING:
             actionString = @"Toggle Hotkey Window Pinning";
             break;
+        case KEY_ACTION_UNDO:
+            actionString = @"Undo";
+            break;
         case KEY_ACTION_FIND_REGEX:
             actionString = [NSString stringWithFormat:@"Find Regex “%@”", auxText];
             break;
@@ -450,12 +454,43 @@ static NSString *const kFactoryDefaultsGlobalPreset = @"Factory Defaults";
             }
             break;
         }
+        case KEY_ACTION_MOVE_END_OF_SELECTION_LEFT:
+            actionString = [NSString stringWithFormat:@"Move End of Selection Left %@",
+                            [self stringForSelectionMovementUnit:auxText.integerValue]];
+            break;
+        case KEY_ACTION_MOVE_END_OF_SELECTION_RIGHT:
+            actionString = [NSString stringWithFormat:@"Move End of Selection Right %@",
+                            [self stringForSelectionMovementUnit:auxText.integerValue]];
+            break;
+        case KEY_ACTION_MOVE_START_OF_SELECTION_LEFT:
+            actionString = [NSString stringWithFormat:@"Move Start of Selection Left %@",
+                            [self stringForSelectionMovementUnit:auxText.integerValue]];
+            break;
+        case KEY_ACTION_MOVE_START_OF_SELECTION_RIGHT:
+            actionString = [NSString stringWithFormat:@"Move Start of Selection Right %@",
+                            [self stringForSelectionMovementUnit:auxText.integerValue]];
+            break;
+
         default:
             actionString = [NSString stringWithFormat: @"%@ %d", @"Unknown Action ID", action];
             break;
     }
 
     return actionString;
+}
+
++ (NSString *)stringForSelectionMovementUnit:(PTYTextViewSelectionExtensionUnit)unit {
+    switch (unit) {
+        case kPTYTextViewSelectionExtensionUnitLine:
+            return @"By Line";
+        case kPTYTextViewSelectionExtensionUnitCharacter:
+            return @"By Character";
+        case kPTYTextViewSelectionExtensionUnitWord:
+            return @"By Word";
+        default:
+            NSLog(@"Unrecognized selection movement unit %@", @(unit));
+            return @"";
+    }
 }
 
 + (BOOL)haveGlobalKeyMappingForKeyString:(NSString*)keyString

@@ -3,9 +3,9 @@
 #import "Autocomplete.h"
 #import "FutureMethods.h"
 #import "iTermInstantReplayWindowController.h"
+#import "iTermPopupWindowController.h"
 #import "iTermToolbeltView.h"
 #import "PasteboardHistory.h"
-#import "Popup.h"
 #import "ProfileListView.h"
 #import "PSMTabBarControl.h"
 #import "PTYTabView.h"
@@ -34,6 +34,14 @@ extern NSString *const kPseudoTerminalStateRestorationWindowArrangementKey;
   PSMTabViewDelegate,
   PTYWindowDelegateProtocol,
   WindowControllerInterface>
+
+// Called when entering fullscreen has finished.
+// Used to make restoring fullscreen windows work on 10.11.
+@property(nonatomic, copy) void (^didEnterLionFullscreen)(PseudoTerminal *);
+
+// Is this window in the process of becoming fullscreen?
+// Used to make restoring fullscreen windows work on 10.11.
+@property(nonatomic, readonly) BOOL togglingLionFullScreen;
 
 // Up to one window may be the hotkey window, which is toggled with the system-wide
 // hotkey.
@@ -92,18 +100,18 @@ extern NSString *const kPseudoTerminalStateRestorationWindowArrangementKey;
 // windowType: Describes constraints on the window's initial frame and border, and more.
 // screen: An index into [NSScreen screens], or -1 to let the system pick a
 //   screen.
-- (id)initWithSmartLayout:(BOOL)smartLayout
-               windowType:(iTermWindowType)windowType
-          savedWindowType:(iTermWindowType)savedWindowType
-                   screen:(int)screenIndex;
+- (instancetype)initWithSmartLayout:(BOOL)smartLayout
+                         windowType:(iTermWindowType)windowType
+                    savedWindowType:(iTermWindowType)savedWindowType
+                             screen:(int)screenIndex;
 
 // isHotkey indicates if this is a hotkey window, which recieves special
 // treatment and must be unique.
-- (id)initWithSmartLayout:(BOOL)smartLayout
-               windowType:(iTermWindowType)windowType
-          savedWindowType:(iTermWindowType)savedWindowType
-                   screen:(int)screenNumber
-                 isHotkey:(BOOL)isHotkey;
+- (instancetype)initWithSmartLayout:(BOOL)smartLayout
+                         windowType:(iTermWindowType)windowType
+                    savedWindowType:(iTermWindowType)savedWindowType
+                             screen:(int)screenNumber
+                           isHotkey:(BOOL)isHotkey;
 
 // If a PseudoTerminal is created with -init (such as happens with AppleScript)
 // this must be called before it is used.
@@ -120,9 +128,6 @@ extern NSString *const kPseudoTerminalStateRestorationWindowArrangementKey;
 
 // The PTYWindow for this controller.
 - (PTYWindow*)ptyWindow;
-
-// Called on object deallocation.
-- (void)dealloc;
 
 // Fix the window frame for fullscreen, top, bottom windows.
 - (void)canonicalizeWindowFrame;
@@ -141,9 +146,6 @@ extern NSString *const kPseudoTerminalStateRestorationWindowArrangementKey;
 // [sender representedObject]. Used by menu items in the Bookmarks menu.
 - (void)newSessionInTabAtIndex:(id)sender;
 
-// Toggles visibility of fullscreen tab bar.
-- (void)toggleFullScreenTabBar;
-
 // Is there a saved scroll position?
 - (BOOL)hasSavedScrollPosition;
 
@@ -158,9 +160,6 @@ extern NSString *const kPseudoTerminalStateRestorationWindowArrangementKey;
 
 // Toggle non-Lion fullscreen mode.
 - (void)toggleTraditionalFullScreenMode;
-
-// accessor
-- (BOOL)fullScreenTabControl;
 
 // Should the tab bar be shown?
 - (BOOL)tabBarShouldBeVisible;
@@ -282,7 +281,6 @@ extern NSString *const kPseudoTerminalStateRestorationWindowArrangementKey;
             withSize:(NSSize *)size;
 
 - (NSColor *)accessoryTextColor;
-- (void)openPasswordManagerToAccountName:(NSString *)name;
 
 @end
 

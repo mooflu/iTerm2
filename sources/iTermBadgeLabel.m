@@ -111,38 +111,57 @@
 // have 0 pixels.
 - (NSImage *)imageWithPointSize:(CGFloat)pointSize {
     NSDictionary *attributes = [self attributesWithPointSize:pointSize];
-    NSSize sizeWithFont = [self sizeWithAttributes:attributes];
+    NSMutableDictionary *temp = [[attributes mutableCopy] autorelease];
+    temp[NSStrokeColorAttributeName] = [_backgroundColor colorWithAlphaComponent:1];
+    NSSize sizeWithFont = [self sizeWithAttributes:temp];
     if (sizeWithFont.width <= 0 && sizeWithFont.height <= 0) {
         return nil;
     }
 
     NSImage *image = [[[NSImage alloc] initWithSize:sizeWithFont] autorelease];
     [image lockFocus];
-    NSMutableDictionary *temp = [[attributes mutableCopy] autorelease];
-    temp[NSStrokeWidthAttributeName] = @-2;
-    temp[NSStrokeColorAttributeName] =
-        [_backgroundColor colorWithAlphaComponent:_fillColor.alphaComponent];
     [_stringValue drawWithRect:NSMakeRect(0, 0, sizeWithFont.width, sizeWithFont.height)
                        options:NSStringDrawingUsesLineFragmentOrigin
                     attributes:temp];
     [image unlockFocus];
 
-    return image;
+    NSImage *reducedAlphaImage = [[[NSImage alloc] initWithSize:sizeWithFont] autorelease];
+    [reducedAlphaImage lockFocus];
+    [image drawInRect:NSMakeRect(0, 0, image.size.width, image.size.height)
+             fromRect:NSZeroRect
+            operation:NSCompositeSourceOver
+             fraction:_fillColor.alphaComponent];
+    [reducedAlphaImage unlockFocus];
+
+    return reducedAlphaImage;
 }
 
 // Attributed string attributes for a given font point size.
 - (NSDictionary *)attributesWithPointSize:(CGFloat)pointSize {
     NSFontManager *fontManager = [NSFontManager sharedFontManager];
-    NSFont *font = [fontManager convertFont:[NSFont fontWithName:@"Helvetica" size:pointSize]
-                                toHaveTrait:NSBoldFontMask];
+    NSArray *fonts = [[NSFontManager sharedFontManager] availableFontFamilies];
+    NSString *fontName = [iTermAdvancedSettingsModel badgeFont];
+    NSFont *font;
+    if (![fonts containsObject:fontName]) {
+      fontName = @"Helvetica";
+    }
+    font = [NSFont fontWithName:fontName size:pointSize];
+    if ([iTermAdvancedSettingsModel badgeFontIsBold]) {
+      font = [fontManager convertFont:font
+                          toHaveTrait:NSBoldFontMask];
+    }
+
     NSDictionary *attributes = @{ NSFontAttributeName: font,
                                   NSForegroundColorAttributeName: _fillColor,
-                                  NSParagraphStyleAttributeName: _paragraphStyle };
+                                  NSParagraphStyleAttributeName: _paragraphStyle,
+                                  NSStrokeWidthAttributeName: @-2 };
     return attributes;
 }
 
 // Size of the image resulting from drawing an attributed string with |attributes|.
 - (NSSize)sizeWithAttributes:(NSDictionary *)attributes {
+    NSSize size = self.maxSize;
+    size.height = CGFLOAT_MAX;
     NSRect bounds = [_stringValue boundingRectWithSize:self.maxSize
                                                options:NSStringDrawingUsesLineFragmentOrigin
                                             attributes:attributes];
@@ -151,9 +170,11 @@
 
 // Max size of image in points within the containing view.
 - (NSSize)maxSize {
+    double maxWidth = MIN(1.0, MAX(0.01, [iTermAdvancedSettingsModel badgeMaxWidthFraction]));
+    double maxHeight = MIN(1.0, MAX(0.0, [iTermAdvancedSettingsModel badgeMaxHeightFraction]));
     NSSize maxSize = _viewSize;
-    maxSize.width *= 0.5;
-    maxSize.height *= 0.2;
+    maxSize.width *= maxWidth;
+    maxSize.height *= maxHeight;
     return maxSize;
 }
 

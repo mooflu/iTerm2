@@ -29,32 +29,25 @@
 
 
 #import <Cocoa/Cocoa.h>
+#import "iTermPopupWindowController.h"
 #import "PTYTextView.h"
-#import "Popup.h"
 #import "PopupEntry.h"
 #import "VT100Screen.h"
 
 #define kPasteboardHistoryDidChange @"PasteboardHistoryDidChange"
 
-@interface PasteboardEntry : PopupEntry {
-    @public
-    NSDate* timestamp;
-}
+@interface PasteboardEntry : PopupEntry
+
+@property(nonatomic, retain) NSDate *timestamp;
 
 + (PasteboardEntry*)entryWithString:(NSString *)s score:(double)score;
-- (NSDate*)timestamp;
 
 @end
 
-@interface PasteboardHistory : NSObject {
-    NSMutableArray* entries_;
-    int maxEntries_;
-    NSString* path_;
-}
+@interface PasteboardHistory : NSObject
 
-+ (PasteboardHistory*)sharedInstance;
-- (id)initWithMaxEntries:(int)maxEntries;
-- (void)dealloc;
++ (instancetype)sharedInstance;
+- (instancetype)initWithMaxEntries:(int)maxEntries;
 - (NSArray*)entries;
 - (void)save:(NSString*)value;
 
@@ -69,14 +62,8 @@
 
 @end
 
-@interface PasteboardHistoryWindowController : Popup
-{
-    IBOutlet NSTableView* table_;
-    NSTimer* minuteRefreshTimer_;
-}
+@interface PasteboardHistoryWindowController : iTermPopupWindowController
 
-- (id)init;
-- (void)dealloc;
 - (void)pasteboardHistoryDidChange:(id)sender;
 - (void)copyFromHistory;
 - (void)refresh;

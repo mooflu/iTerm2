@@ -6,11 +6,16 @@
 //
 
 #import "ProfileModelWrapper.h"
+#import "DebugLogging.h"
 
-@implementation ProfileModelWrapper
+@implementation ProfileModelWrapper {
+    ProfileModel* underlyingModel;
+    NSMutableArray* bookmarks;
+    NSMutableString* filter;
+    NSArray* sortDescriptors;
+}
 
-- (id)initWithModel:(ProfileModel*)model
-{
+- (instancetype)initWithModel:(ProfileModel*)model {
     self = [super init];
     if (self) {
         underlyingModel = model;
@@ -80,15 +85,17 @@
 }
 
 - (void)sync {
+    DLog(@"Synchronize profile model wrapper with underlying bookmarks");
     [bookmarks removeAllObjects];
-    NSArray* filteredBookmarks = [underlyingModel bookmarkIndicesMatchingFilter:filter
+    NSArray *filteredBookmarks = [underlyingModel bookmarkIndicesMatchingFilter:filter
                                                                          orGuid:self.lockedGuid];
-    for (NSNumber* n in filteredBookmarks) {
+    for (NSNumber *n in filteredBookmarks) {
         int i = [n intValue];
         [bookmarks addObject:[[[ProfileTableRow alloc] initWithBookmark:[underlyingModel profileAtIndex:i]
                                                         underlyingModel:underlyingModel] autorelease]];
     }
     [self sort];
+    DLog(@"There are now %d bookmarks", (int)bookmarks.count);
 }
 
 - (void)moveBookmarkWithGuid:(NSString*)guid toIndex:(int)row

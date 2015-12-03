@@ -8,7 +8,7 @@
 
 #import <Cocoa/Cocoa.h>
 
-@protocol PointerControllerDelegate
+@protocol PointerControllerDelegate <NSObject>
 
 - (void)pasteFromClipboardWithEvent:(NSEvent *)event;
 - (void)pasteFromSelectionWithEvent:(NSEvent *)event;
@@ -36,18 +36,20 @@
 - (void)selectNextPaneWithEvent:(NSEvent *)event;
 - (void)selectPreviousPaneWithEvent:(NSEvent *)event;
 - (void)extendSelectionWithEvent:(NSEvent *)event;
+- (void)quickLookWithEvent:(NSEvent *)event;
 
 @end
 
 @interface PointerController : NSObject
 
-@property (nonatomic, assign) NSObject<PointerControllerDelegate> *delegate;
+@property(nonatomic, assign) id<PointerControllerDelegate> delegate;
+@property(nonatomic, readonly) BOOL viewShouldTrackTouches;
 
 - (BOOL)mouseDown:(NSEvent *)event withTouches:(int)numTouches ignoreOption:(BOOL)ignoreOption;
 - (BOOL)mouseUp:(NSEvent *)event withTouches:(int)numTouches;
+- (BOOL)pressureChangeWithEvent:(NSEvent *)event;
 - (void)swipeWithEvent:(NSEvent *)event;
 - (BOOL)eventEmulatesRightClick:(NSEvent *)event;
-- (BOOL)viewShouldTrackTouches;
 - (void)notifyLeftMouseDown;
 
 @end

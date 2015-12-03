@@ -11,7 +11,7 @@
 
 @class iTermAnnouncementViewController;
 
-@protocol iTermAnnouncementDelegate
+@protocol iTermAnnouncementDelegate <NSObject>
 - (void)announcementWillDismiss:(iTermAnnouncementViewController *)announcement;
 @end
 
@@ -19,6 +19,9 @@
 
 @property(nonatomic, assign) id<iTermAnnouncementDelegate> delegate;
 @property(nonatomic, copy) void (^completion)(int);
+
+// NOTE: Once this is set to YES it can never be changed.
+@property(nonatomic, assign) BOOL dismissOnKeyDown;
 
 + (instancetype)announcementWithTitle:(NSString *)title
                                 style:(iTermAnnouncementViewStyle)style

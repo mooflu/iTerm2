@@ -234,6 +234,12 @@
 // Draw mark indicators?
 @property(nonatomic, assign) BOOL drawMarkIndicators;
 
+// Use light font smoothing?
+@property(nonatomic) BOOL thinStrokes;
+
+// Change the cursor to indicate that a search is being performed.
+@property(nonatomic, assign) BOOL showSearchingCursor;
+
 // Updates self.blinkingFound.
 - (void)drawTextViewContentInRect:(NSRect)rect
                          rectsPtr:(const NSRect *)rectArray

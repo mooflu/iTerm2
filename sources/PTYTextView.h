@@ -17,6 +17,7 @@
 @class CRunStorage;
 @class iTermFindCursorView;
 @class iTermFindOnPageHelper;
+@class iTermQuickLookController;
 @class iTermSelection;
 @protocol iTermSemanticHistoryControllerDelegate;
 @class MovingAverage;
@@ -35,12 +36,28 @@
 #define NSRightAlternateKeyMask (0x000040 | NSAlternateKeyMask)
 
 // Types of characters. Used when classifying characters for word selection.
-typedef enum {
+typedef NS_ENUM(NSInteger, PTYCharType) {
     CHARTYPE_WHITESPACE,  // whitespace chars or NUL
     CHARTYPE_WORDCHAR,    // Any character considered part of a word, including user-defined chars.
     CHARTYPE_DW_FILLER,   // Double-width character effluvia.
     CHARTYPE_OTHER,       // Symbols, etc. Anything that doesn't fall into the other categories.
-} PTYCharType;
+};
+
+typedef NS_ENUM(NSInteger, PTYTextViewSelectionEndpoint) {
+    kPTYTextViewSelectionEndpointStart,
+    kPTYTextViewSelectionEndpointEnd
+};
+
+typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionDirection) {
+    kPTYTextViewSelectionExtensionDirectionLeft,
+    kPTYTextViewSelectionExtensionDirectionRight
+};
+
+typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
+    kPTYTextViewSelectionExtensionUnitCharacter,
+    kPTYTextViewSelectionExtensionUnitWord,
+    kPTYTextViewSelectionExtensionUnitLine,
+};
 
 @protocol PTYTextViewDelegate <NSObject>
 
@@ -139,6 +156,8 @@ typedef enum {
 
 // Is it possible to restart this session?
 - (BOOL)isRestartable;
+- (void)textViewToggleAnnotations;
+- (BOOL)textViewShouldAcceptKeyDownEvent:(NSEvent *)event;
 
 @end
 
@@ -173,6 +192,9 @@ typedef enum {
 
 // Use a different font for bold, if available?
 @property(nonatomic, assign) BOOL useBoldFont;
+
+// Draw text with light font smoothing?
+@property(nonatomic, assign) BOOL thinStrokes;
 
 // Use a bright version of the text color for bold text?
 @property(nonatomic, assign) BOOL useBrightBold;
@@ -255,6 +277,11 @@ typedef void (^PTYTextViewDrawingHookBlock)(iTermTextDrawingHelper *);
 // For tests.
 @property(nonatomic, readonly) NSRect cursorFrame;
 
+// Change the cursor to indicate that a search is being performed.
+@property(nonatomic, assign) BOOL showSearchingCursor;
+
+@property(nonatomic, readonly) iTermQuickLookController *quickLookController;
+
 // Returns the size of a cell for a given font. hspace and vspace are multipliers and the width
 // and height.
 + (NSSize)charSizeForFont:(NSFont*)aFont
@@ -264,7 +291,7 @@ typedef void (^PTYTextViewDrawingHookBlock)(iTermTextDrawingHelper *);
 // This is the designated initializer. The color map should have the
 // basic colors plus the 8-bit ansi colors set shortly after this is
 // called.
-- (id)initWithFrame:(NSRect)frame colorMap:(iTermColorMap *)colorMap;
+- (instancetype)initWithFrame:(NSRect)frame colorMap:(iTermColorMap *)colorMap;
 
 // Sets the "changed since last Exposé" flag to NO and returns its original value.
 - (BOOL)getAndResetChangedSinceLastExpose;
@@ -330,9 +357,6 @@ typedef void (^PTYTextViewDrawingHookBlock)(iTermTextDrawingHelper *);
 // Remove underline indicating clickable URL.
 - (void)removeUnderline;
 
-// Toggles whether line timestamps are displayed.
-- (void)toggleShowTimestamps;
-
 // Update the scroll position and schedule a redraw. Returns true if anything
 // onscreen is blinking.
 - (BOOL)refresh;
@@ -356,7 +380,8 @@ typedef void (^PTYTextViewDrawingHookBlock)(iTermTextDrawingHelper *);
 // Saving/printing
 - (void)saveDocumentAs:(id)sender;
 - (void)print:(id)sender;
-- (void)printContent:(NSString *)aString;
+// aString is either an NSString or an NSAttributedString.
+- (void)printContent:(id)aString;
 
 // Begins a new search. You may need to call continueFind repeatedly after this.
 - (void)findString:(NSString*)aString
@@ -449,6 +474,21 @@ typedef void (^PTYTextViewDrawingHookBlock)(iTermTextDrawingHelper *);
 
 // A text badge shown in the top right of the window
 - (void)setBadgeLabel:(NSString *)badgeLabel;
+
+// Menu for session title bar hamburger button
+- (NSMenu *)titleBarMenu;
+
+- (void)moveSelectionEndpoint:(PTYTextViewSelectionEndpoint)endpoint
+                  inDirection:(PTYTextViewSelectionExtensionDirection)direction
+                           by:(PTYTextViewSelectionExtensionUnit)unit;
+
+// For focus follows mouse. Allows a new split pane to become focused even though the mouse pointer
+// is elsewhere. Records the mouse position. Refuses first responder as long as the mouse doesn't
+// move.
+- (void)refuseFirstResponderAtCurrentMouseLocation;
+
+// Undoes -refuseFirstResponderAtCurrentMouseLocation.
+- (void)resetMouseLocationToRefuseFirstResponderAt;
 
 #pragma mark - Testing only
 

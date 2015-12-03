@@ -65,7 +65,7 @@ static NSDate* lastResizeDate_;
     _announcements = [[NSMutableArray alloc] init];
 }
 
-- (id)initWithFrame:(NSRect)frame {
+- (instancetype)initWithFrame:(NSRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
         [self _initCommon];
@@ -80,7 +80,7 @@ static NSDate* lastResizeDate_;
     return self;
 }
 
-- (id)initWithFrame:(NSRect)frame session:(PTYSession*)session {
+- (instancetype)initWithFrame:(NSRect)frame session:(PTYSession*)session {
     self = [self initWithFrame:frame];
     if (self) {
         [self _initCommon];
@@ -179,13 +179,16 @@ static NSDate* lastResizeDate_;
     }
 }
 
-// See comments in -[PTYTextView updateTrackingAreas] about why this is done.
+// It's very expensive for PTYTextView to own its own tracking events because its frame changes
+// constantly, plus it can miss mouse exit events and spurious mouse enter events (issue 3345).
+// I beleive it also caused hangs (issue 3974).
 - (void)updateTrackingAreas {
     if ([self window]) {
         int trackingOptions;
         trackingOptions = (NSTrackingMouseEnteredAndExited |
                            NSTrackingActiveAlways |
-                           NSTrackingEnabledDuringMouseDrag);
+                           NSTrackingEnabledDuringMouseDrag |
+                           NSTrackingMouseMoved);
         while (self.trackingAreas.count) {
             [self removeTrackingArea:self.trackingAreas[0]];
         }
@@ -202,7 +205,11 @@ static NSDate* lastResizeDate_;
 }
 
 - (void)mouseExited:(NSEvent *)theEvent {
-    [[_session textview] mouseEntered:theEvent];
+    [[_session textview] mouseExited:theEvent];
+}
+
+- (void)mouseMoved:(NSEvent *)theEvent {
+    [[_session textview] mouseMoved:theEvent];
 }
 
 - (void)rightMouseDown:(NSEvent*)event {
@@ -441,7 +448,7 @@ static NSDate* lastResizeDate_;
 - (BOOL)performDragOperation:(id<NSDraggingInfo>)sender {
     if ([[[sender draggingPasteboard] types] indexOfObject:@"iTermDragPanePBType"] != NSNotFound) {
         if ([[MovePaneController sharedInstance] isMovingSession:[self session]]) {
-            if (_session.tab.sessions.count == 1) {
+            if (_session.tab.sessions.count == 1 && !_session.tab.realParentWindow.anyFullScreen) {
                 // If you dragged a session from a tab with split panes onto itself then do nothing.
                 // But if you drag a session onto itself in a tab WITHOUT split panes, then move the
                 // whole window.
@@ -606,12 +613,16 @@ static NSDate* lastResizeDate_;
 
 #pragma mark SessionTitleViewDelegate
 
+- (BOOL)sessionTitleViewIsFirstResponder {
+    return _session.textview.window.firstResponder == _session.textview;
+}
+
 - (NSColor *)tabColor {
     return _session.tabColor;
 }
 
 - (NSMenu *)menu {
-    return [[_session textview] menuForEvent:nil];
+    return [[_session textview] titleBarMenu];
 }
 
 - (void)close {

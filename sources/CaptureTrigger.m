@@ -9,9 +9,10 @@
 #import "CaptureTrigger.h"
 
 #import "CapturedOutput.h"
-#import "CommandHistory.h"
 #import "iTermAnnouncementViewController.h"
 #import "iTermApplicationDelegate.h"
+#import "iTermCapturedOutputMark.h"
+#import "iTermShellHistoryController.h"
 #import "iTermToolbeltView.h"
 #import "PTYSession.h"
 #import "PTYTab.h"
@@ -106,6 +107,7 @@ static NSString *const kSuppressCaptureOutputToolNotVisibleWarning =
                                                          style:kiTermAnnouncementViewStyleWarning
                                                    withActions:@[ @"Show It", @"Silence Warning" ]
                                                     completion:completion];
+    announcement.dismissOnKeyDown = YES;
     [aSession queueAnnouncement:announcement
                      identifier:kSuppressCaptureOutputToolNotVisibleWarning];
 }

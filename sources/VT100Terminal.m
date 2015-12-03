@@ -195,7 +195,7 @@ static const int kMaxScreenRows = 4096;
 
 #pragma mark - Instance methods
 
-- (id)init {
+- (instancetype)init {
     self = [super init];
     if (self) {
         _output = [[VT100Output alloc] init];
@@ -255,6 +255,9 @@ static const int kMaxScreenRows = 4096;
 
     int r;
 
+    // NOTE: This seems to cause a memory leak. The setter for termTypeIsValid (below) has the
+    // side effect of copying various curses strings, and it depends on this. When I redo output,
+    // fix this disaster.
     setupterm((char *)[_termType UTF8String], fileno(stdout), &r);
     if (r != 1) {
         NSLog(@"Terminal type %s is not defined.", [_termType UTF8String]);
@@ -292,7 +295,7 @@ static const int kMaxScreenRows = 4096;
     }
 }
 
-- (void)resetPreservingPrompt:(BOOL)preservePrompt {
+- (void)resetByUserRequest:(BOOL)userInitiated {
     self.cursorMode = NO;
     if (_columnMode) {
         [delegate_ terminalSetWidth:80];
@@ -326,7 +329,10 @@ static const int kMaxScreenRows = 4096;
         altSavedCursor_.lineDrawing[i] = NO;
     }
     [self resetSavedCursorPositions];
-    [delegate_ terminalResetPreservingPrompt:preservePrompt];
+    if (userInitiated) {
+        [_parser reset];
+    }
+    [delegate_ terminalResetPreservingPrompt:userInitiated];
 }
 
 - (void)setWraparoundMode:(BOOL)mode {
@@ -1174,6 +1180,7 @@ static const int kMaxScreenRows = 4096;
             return;
         } else if (token->type == XTERMCC_MULTITOKEN_END) {
             [delegate_ terminalDidFinishReceivingFile];
+            receivingFile_ = NO;
             return;
         } else {
             [delegate_ terminalFileReceiptEndedUnexpectedly];
@@ -1407,7 +1414,7 @@ static const int kMaxScreenRows = 4096;
             break;
 
         case ANSI_RIS:
-            [self resetPreservingPrompt:NO];
+            [self resetByUserRequest:NO];
             break;
         case VT100CSI_SM:
         case VT100CSI_RM: {

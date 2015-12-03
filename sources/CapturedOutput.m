@@ -8,6 +8,7 @@
 
 #import "CapturedOutput.h"
 #import "CaptureTrigger.h"
+#import "iTermCapturedOutputMark.h"
 #import "NSDictionary+iTerm.h"
 #import "NSObject+iTerm.h"
 #import "VT100ScreenMark.h"
@@ -31,7 +32,7 @@ NSString *const kCapturedOutputMarkGuidKey = @"Mark Guid";
         capturedOutput.values = dict[kCapturedOutputValuesKey];
         capturedOutput.triggerDigest = dict[kCapturedOutputTriggerHashKey];
         capturedOutput.state = [dict[kCapturedOutputStateKey] boolValue];
-        capturedOutput.markGuid = [dict[kCapturedOutputMarkGuidKey] autorelease];
+        capturedOutput.markGuid = [[dict[kCapturedOutputMarkGuidKey] copy] autorelease];
     }
     return capturedOutput;
 }
@@ -66,7 +67,7 @@ NSString *const kCapturedOutputMarkGuidKey = @"Mark Guid";
          kCapturedOutputValuesKey: _values ?: @[],
     kCapturedOutputTriggerHashKey: _trigger.digest ?: [NSData data],
           kCapturedOutputStateKey: @(_state),
-       kCapturedOutputMarkGuidKey: _mark.guid };
+       kCapturedOutputMarkGuidKey: _mark.guid ?: @"Mark Missing" };
 
     return [dict dictionaryByRemovingNullValues];
 }

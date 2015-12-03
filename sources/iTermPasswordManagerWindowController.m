@@ -52,7 +52,7 @@ static NSString *const kPasswordManagersShouldReloadData = @"kPasswordManagersSh
     return [[array sortedArrayUsingSelector:@selector(compare:)] retain];
 }
 
-- (id)init {
+- (instancetype)init {
     self = [self initWithWindowNibName:@"iTermPasswordManager"];
     if (self) {
         [[NSNotificationCenter defaultCenter] addObserver:self
@@ -335,6 +335,9 @@ dataCellForTableColumn:(NSTableColumn *)tableColumn
     NSTextView *fieldEditor = [aNotification userInfo][@"NSFieldEditor"];
     if ((id)[fieldEditor delegate] == _searchField) {
         [self reloadAccounts];
+    }
+    if ([self numberOfRowsInTableView:_tableView] == 1) {
+        [_tableView selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
     }
 }
 

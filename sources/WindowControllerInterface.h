@@ -4,7 +4,7 @@
 #import "ProfileModel.h"
 #import "PTYTabDelegate.h"
 
-@class Popup;
+@class iTermPopupWindowController;
 @class PSMTabBarControl;
 @class PTYSession;
 @class PTYTab;
@@ -12,12 +12,12 @@
 @class TmuxController;
 @class VT100RemoteHost;
 
-typedef enum {
+typedef NS_ENUM(NSInteger, BroadcastMode) {
     BROADCAST_OFF,
     BROADCAST_TO_ALL_PANES,
     BROADCAST_TO_ALL_TABS,
     BROADCAST_CUSTOM
-} BroadcastMode;
+};
 
 // This is a very basic interface, which is sufficient for simulating a window
 // controller for instant replay.
@@ -53,9 +53,6 @@ typedef enum {
 // Disable blur for window.
 - (void)disableBlur;
 
-// Is the window title transient?
-- (BOOL)tempTitle;
-
 // Force the window size to change to be just large enough to fit this session.
 - (void)fitWindowToTab:(PTYTab*)tab;
 
@@ -67,9 +64,6 @@ typedef enum {
 
 // Set the window title to the name of the current session.
 - (void)setWindowTitle;
-
-// Set the window title to non-transient.
-- (void)resetTempTitle;
 
 // Return the foreground tab
 - (PTYTab*)currentTab;
@@ -164,9 +158,14 @@ typedef enum {
 // Show or hide this window's toolbelt.
 - (IBAction)toggleToolbeltVisibility:(id)sender;
 
-- (void)popupWillClose:(Popup *)popup;
+- (void)popupWillClose:(iTermPopupWindowController *)popup;
 
 - (void)toggleFullScreenMode:(id)sender;
+
+// Is the window title transient?
+- (void)clearTransientTitle;
+- (BOOL)isShowingTransientTitle;
+
 
 #pragma mark - Tabs
 
@@ -253,6 +252,8 @@ typedef enum {
 
 // Enable or disable transparency support for a window.
 - (void)toggleUseTransparency:(id)sender;
+
+- (void)openPasswordManagerToAccountName:(NSString *)name inSession:(PTYSession *)session;
 
 #pragma mark - Instant replay
 

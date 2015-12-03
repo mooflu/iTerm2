@@ -42,11 +42,14 @@
 
 // If a modifier+digit switches panes, this is the value of digit. Used to show in title bar.
 @property(nonatomic, assign) int ordinal;
+@property(nonatomic, readonly) iTermAnnouncementViewController *currentAnnouncement;
 
 + (double)titleHeight;
 + (NSDate*)lastResizeDate;
 + (void)windowDidResize;
-- (id)initWithFrame:(NSRect)frame session:(PTYSession*)session;
+
+- (instancetype)initWithFrame:(NSRect)frame session:(PTYSession*)session;
+
 - (void)setDimmed:(BOOL)isDimmed;
 - (FindViewController*)findViewController;
 - (void)setBackgroundDimmed:(BOOL)backgroundDimmed;

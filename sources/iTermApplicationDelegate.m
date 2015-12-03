@@ -44,6 +44,7 @@
 #import "iTermProfilesWindowController.h"
 #import "iTermPasswordManagerWindowController.h"
 #import "iTermRestorableSession.h"
+#import "iTermQuickLookController.h"
 #import "iTermTipController.h"
 #import "iTermURLSchemeController.h"
 #import "iTermWarning.h"
@@ -61,7 +62,10 @@
 #import "Sparkle/SUUpdater.h"
 #import "ToastWindowController.h"
 #import "VT100Terminal.h"
+
+#import <Quartz/Quartz.h>
 #import <objc/runtime.h>
+
 #include "iTermFileDescriptorClient.h"
 #include <sys/stat.h>
 #include <unistd.h>
@@ -78,6 +82,7 @@ NSString *const kNonTerminalWindowBecameKeyNotification = @"kNonTerminalWindowBe
 static NSString *const kMarkAlertAction = @"Mark Alert Action";
 NSString *const kMarkAlertActionModalAlert = @"Modal Alert";
 NSString *const kMarkAlertActionPostNotification = @"Post Notification";
+NSString *const kShowFullscreenTabsSettingDidChange = @"kShowFullscreenTabsSettingDidChange";
 
 static NSString *const kScreenCharRestorableStateKey = @"kScreenCharRestorableStateKey";
 static NSString *const kHotkeyWindowRestorableState = @"kHotkeyWindowRestorableState";
@@ -189,7 +194,7 @@ static BOOL hasBecomeActive = NO;
         return;
     }
     [[iTermController sharedInstance] setStartingUp:YES];
-    // Check if we have an autolauch script to execute. Do it only once, i.e. at application launch.
+    // Check if we have an autolaunch script to execute. Do it only once, i.e. at application launch.
     if (ranAutoLaunchScript == NO &&
         [[NSFileManager defaultManager] fileExistsAtPath:[AUTO_LAUNCH_SCRIPT stringByExpandingTildeInPath]]) {
         ranAutoLaunchScript = YES;
@@ -414,6 +419,8 @@ static BOOL hasBecomeActive = NO;
 }
 
 - (void)sparkleWillRestartApp:(NSNotification *)notification {
+    [NSApp invalidateRestorableState];
+    [[NSApp windows] makeObjectsPerformSelector:@selector(invalidateRestorableState)];
     _sparkleRestarting = YES;
 }
 
@@ -650,9 +657,7 @@ static BOOL hasBecomeActive = NO;
     }
 }
 
-// init
-- (id)init
-{
+- (instancetype)init {
     self = [super init];
     if (self) {
         // Add ourselves as an observer for notifications.
@@ -740,14 +745,16 @@ static BOOL hasBecomeActive = NO;
 }
 
 - (IBAction)openPasswordManager:(id)sender {
-    [self openPasswordManagerToAccountName:nil];
+    [self openPasswordManagerToAccountName:nil inSession:nil];
 }
 
-- (void)openPasswordManagerToAccountName:(NSString *)name {
-    PseudoTerminal *term = [[iTermController sharedInstance] currentTerminal];
-
+- (void)openPasswordManagerToAccountName:(NSString *)name inSession:(PTYSession *)session {
+    id<iTermWindowController> term = [[iTermController sharedInstance] currentTerminal];
+    if (session) {
+        term = session.tab.realParentWindow;
+    }
     if (term) {
-        return [term openPasswordManagerToAccountName:name];
+        return [term openPasswordManagerToAccountName:name inSession:session];
     } else {
         if (!_passwordManagerWindowController) {
             _passwordManagerWindowController = [[iTermPasswordManagerWindowController alloc] init];
@@ -830,9 +837,12 @@ static BOOL hasBecomeActive = NO;
 }
 
 // Action methods
-- (IBAction)toggleFullScreenTabBar:(id)sender
-{
-    [[[iTermController sharedInstance] currentTerminal] toggleFullScreenTabBar];
+- (IBAction)toggleFullScreenTabBar:(id)sender {
+    BOOL value = [iTermPreferences boolForKey:kPreferenceKeyShowFullscreenTabBar];
+    [iTermPreferences setBool:!value forKey:kPreferenceKeyShowFullscreenTabBar];
+    [[NSNotificationCenter defaultCenter] postNotificationName:kShowFullscreenTabsSettingDidChange
+                                                        object:nil
+                                                      userInfo:nil];
 }
 
 - (BOOL)possiblyTmuxValueForWindow:(BOOL)isWindow {
@@ -976,6 +986,7 @@ static BOOL hasBecomeActive = NO;
 
     return ([aMenu autorelease]);
 }
+
 
 - (void)applicationWillBecomeActive:(NSNotification *)aNotification
 {
@@ -1244,8 +1255,7 @@ static BOOL hasBecomeActive = NO;
                                               forKey:@"Secure Input"];
 }
 
-- (void)applicationDidBecomeActive:(NSNotification *)aNotification
-{
+- (void)applicationDidBecomeActive:(NSNotification *)aNotification {
     hasBecomeActive = YES;
     if (secureInputDesired_) {
         if (EnableSecureEventInput() != noErr) {
@@ -1254,6 +1264,29 @@ static BOOL hasBecomeActive = NO;
     }
     // Set the state of the control to the new true state.
     [secureInput setState:(secureInputDesired_ && IsSecureEventInputEnabled()) ? NSOnState : NSOffState];
+
+    // If focus follows mouse is on, find the textview under the cursor and make it first responder.
+    // Make its window key.
+    if ([iTermPreferences boolForKey:kPreferenceKeyFocusFollowsMouse]) {
+        NSRect mouseRect = {
+            .origin = [NSEvent mouseLocation],
+            .size = { 0, 0 }
+        };
+        for (NSWindow *window in [NSApp orderedWindows]) {
+            if (!window.isOnActiveSpace) {
+                continue;
+            }
+            NSPoint pointInWindow = [window convertRectFromScreen:mouseRect].origin;
+            if ([window isKindOfClass:[PTYWindow class]]) {
+                NSView *view = [window.contentView hitTest:pointInWindow];
+                if ([view isKindOfClass:[PTYTextView class]]) {
+                    [window makeKeyAndOrderFront:nil];
+                    [window makeFirstResponder:view];
+                    break;
+                }
+            }
+        }
+    }
 }
 
 - (void)applicationDidResignActive:(NSNotification *)aNotification
@@ -1449,8 +1482,8 @@ static BOOL hasBecomeActive = NO;
     }
 }
 
-- (void)updateAddressBookMenu:(NSNotification*)aNotification
-{
+- (void)updateAddressBookMenu:(NSNotification*)aNotification {
+    DLog(@"Updating address book menu");
     JournalParams params;
     params.selector = @selector(newSessionInTabAtIndex:);
     params.openAllSelector = @selector(newSessionsInWindow:);
@@ -1590,13 +1623,8 @@ static BOOL hasBecomeActive = NO;
                [menuItem action] == @selector(newSessionWithSameProfile:)) {
         return [[iTermController sharedInstance] currentTerminal] != nil;
     } else if ([menuItem action] == @selector(toggleFullScreenTabBar:)) {
-        PseudoTerminal *term = [[iTermController sharedInstance] currentTerminal];
-        if (!term || ![term anyFullScreen]) {
-            return NO;
-        } else {
-            [menuItem setState:[term fullScreenTabControl] ? NSOnState : NSOffState];
-            return YES;
-        }
+        [menuItem setState:[iTermPreferences boolForKey:kPreferenceKeyShowFullscreenTabBar] ? NSOnState : NSOffState];
+        return YES;
     } else if ([menuItem action] == @selector(toggleMultiLinePasteWarning:)) {
         menuItem.state = [self warnBeforeMultiLinePaste] ? NSOnState : NSOffState;
         return YES;
@@ -1722,6 +1750,11 @@ static BOOL hasBecomeActive = NO;
 
 - (void)currentSessionDidChange {
     [_passwordManagerWindowController update];
+    QLPreviewPanel *panel = [QLPreviewPanel sharedPreviewPanel];
+    PseudoTerminal *currentWindow = [[iTermController sharedInstance] currentTerminal];
+    if (panel.currentController == currentWindow) {
+        [currentWindow.currentSession.quickLookController takeControl];
+    }
 }
 
 - (PseudoTerminal *)currentTerminal {

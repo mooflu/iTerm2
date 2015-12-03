@@ -8,6 +8,7 @@
 
 @class DVR;
 @class iTermGrowlDelegate;
+@class iTermMark;
 @class iTermStringLine;
 @class LineBuffer;
 @class IntervalTree;
@@ -64,7 +65,7 @@ extern int kVT100ScreenMinRows;
 @property(nonatomic, readonly) NSIndexSet *animatedLines;
 
 // Designated initializer.
-- (id)initWithTerminal:(VT100Terminal *)terminal;
+- (instancetype)initWithTerminal:(VT100Terminal *)terminal;
 
 // Destructively sets the screen size.
 - (void)destructivelySetScreenWidth:(int)width height:(int)height;
@@ -161,7 +162,7 @@ extern int kVT100ScreenMinRows;
 - (VT100ScreenMark *)lastMark;
 - (VT100ScreenMark *)lastPromptMark;
 - (VT100RemoteHost *)lastRemoteHost;
-- (BOOL)markIsValid:(VT100ScreenMark *)mark;
+- (BOOL)markIsValid:(iTermMark *)mark;
 - (id<iTermMark>)addMarkStartingAtAbsoluteLine:(long long)line
                                        oneLine:(BOOL)oneLine
                                        ofClass:(Class)markClass;

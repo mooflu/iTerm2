@@ -15,7 +15,9 @@
     // Find context just after initialization.
     FindContext *_copiedContext;
 
-    // Find cursor. -1,-1 if no cursor.
+    // Find cursor. -1,-1 if no cursor. This is used to select which search result should be
+    // highlighted. If searching forward, it'll be after the find cursor; if searching backward it
+    // will be before the find cursor.
     VT100GridAbsCoord _findCursor;
 
     // Is a find currently executing?
@@ -55,7 +57,7 @@
     BOOL _findRegex;
 }
 
-- (id)init {
+- (instancetype)init {
     self = [super init];
     if (self) {
         _highlightMap = [[NSMutableDictionary alloc] init];
@@ -99,10 +101,6 @@
         if (_findInProgress) {
             [findContext reset];
         }
-
-        long long findY =
-            (long long)(numberOfLines + 1) + totalScrollbackOverflow;
-        _findCursor = VT100GridAbsCoordMake(0, findY);
 
         // Search backwards from the end. This is slower than searching
         // forwards, but most searches are reverse searches begun at the end,
@@ -211,7 +209,7 @@
 }
 
 - (void)addSearchResult:(SearchResult *)searchResult width:(int)width {
-    for (long long y = searchResult->absStartY; y <= searchResult->absEndY; y++) {
+    for (long long y = searchResult.absStartY; y <= searchResult.absEndY; y++) {
         NSNumber* key = [NSNumber numberWithLongLong:y];
         NSMutableData* data = _highlightMap[key];
         BOOL set = NO;
@@ -222,12 +220,12 @@
             set = YES;
         }
         char* b = [data mutableBytes];
-        int lineEndX = MIN(searchResult->endX + 1, width);
-        int lineStartX = searchResult->startX;
-        if (searchResult->absEndY > y) {
+        int lineEndX = MIN(searchResult.endX + 1, width);
+        int lineStartX = searchResult.startX;
+        if (searchResult.absEndY > y) {
             lineEndX = width;
         }
-        if (y > searchResult->absStartY) {
+        if (y > searchResult.absStartY) {
             lineStartX = 0;
         }
         for (int i = lineStartX; i < lineEndX; i++) {
@@ -257,18 +255,18 @@
     if (forward) {
         start = [_searchResults count] - 1;
         stride = -1;
-        if (![self haveFindCursor]) {
-            minPos = -1;
-        } else {
+        if ([self haveFindCursor]) {
             minPos = _findCursor.x + _findCursor.y * width + offset;
+        } else {
+            minPos = -1;
         }
     } else {
         start = 0;
         stride = 1;
-        if (![self haveFindCursor]) {
-            maxPos = (1 + numberOfLines + overflowAdjustment) * width;
-        } else {
+        if ([self haveFindCursor]) {
             maxPos = _findCursor.x + _findCursor.y * width - offset;
+        } else {
+            maxPos = (1 + numberOfLines + overflowAdjustment) * width;
         }
     }
     BOOL found = NO;
@@ -276,16 +274,16 @@
     int i = start;
     for (int j = 0; !found && j < [_searchResults count]; j++) {
         SearchResult* r = [_searchResults objectAtIndex:i];
-        long long pos = r->startX + (long long)r->absStartY * width;
+        long long pos = r.startX + (long long)r.absStartY * width;
         if (!found &&
             ((maxPos >= 0 && pos <= maxPos) ||
              (minPos >= 0 && pos >= minPos))) {
                 found = YES;
                 selectedRange =
-                    VT100GridCoordRangeMake(r->startX,
-                                            r->absStartY - overflowAdjustment,
-                                            r->endX + 1,  // half-open
-                                            r->absEndY - overflowAdjustment);
+                    VT100GridCoordRangeMake(r.startX,
+                                            r.absStartY - overflowAdjustment,
+                                            r.endX + 1,  // half-open
+                                            r.absEndY - overflowAdjustment);
                 [_delegate findOnPageSelectRange:selectedRange wrapped:NO];
             }
         i += stride;
@@ -296,10 +294,10 @@
         SearchResult* r = [_searchResults objectAtIndex:start];
         found = YES;
         selectedRange =
-            VT100GridCoordRangeMake(r->startX,
-                                    r->absStartY - overflowAdjustment,
-                                    r->endX + 1,  // half-open
-                                    r->absEndY - overflowAdjustment);
+            VT100GridCoordRangeMake(r.startX,
+                                    r.absStartY - overflowAdjustment,
+                                    r.endX + 1,  // half-open
+                                    r.absEndY - overflowAdjustment);
         [_delegate findOnPageSelectRange:selectedRange wrapped:YES];
         [_delegate findOnPageDidWrapForwards:forward];
     }

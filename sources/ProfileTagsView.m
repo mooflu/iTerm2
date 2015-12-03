@@ -7,6 +7,7 @@
 //
 
 #import "ProfileTagsView.h"
+#import "DebugLogging.h"
 #import "ProfileModel.h"
 
 static const CGFloat kRowHeight = 21;
@@ -21,8 +22,7 @@ static const CGFloat kRowHeight = 21;
 
 @implementation ProfileTagsView
 
-- (id)initWithFrame:(NSRect)frame
-{
+- (instancetype)initWithFrame:(NSRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
         _scrollView = [[NSScrollView alloc] initWithFrame:self.bounds];
@@ -108,6 +108,7 @@ static const CGFloat kRowHeight = 21;
 #pragma mark - Notifications
 
 - (void)reloadAddressBook:(NSNotification *)notification {
+    DLog(@"Doing reload data on tags view");
     self.cache = nil;
     [_tableView reloadData];
 }

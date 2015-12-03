@@ -8,10 +8,12 @@
 
 #import "ProfilePreferencesViewController.h"
 #import "BulkCopyProfilePreferencesWindowController.h"
+#import "DebugLogging.h"
 #import "ITAddressBookMgr.h"
 #import "iTermController.h"
 #import "iTermFlippedView.h"
 #import "iTermKeyBindingMgr.h"
+#import "iTermProfilePreferences.h"
 #import "iTermSizeRememberingView.h"
 #import "iTermWarning.h"
 #import "PreferencePanel.h"
@@ -95,7 +97,7 @@ NSString *const kProfileSessionNameDidEndEditing = @"kProfileSessionNameDidEndEd
     CGFloat _minWidth;
 }
 
-- (id)init {
+- (instancetype)init {
     self = [super init];
     if (self) {
         [[NSNotificationCenter defaultCenter] addObserver:self
@@ -429,25 +431,32 @@ NSString *const kProfileSessionNameDidEndEditing = @"kProfileSessionNameDidEndEd
 #pragma mark - Actions
 
 - (IBAction)removeProfile:(id)sender {
+    DLog(@"removeProfile called");
     Profile *profile = [self selectedProfile];
     if ([[_delegate profilePreferencesModel] numberOfBookmarks] == 1 || !profile) {
         NSBeep();
     } else if ([self confirmProfileDeletion:profile]) {
         NSString *guid = profile[KEY_GUID];
+        DLog(@"Remove profile with guid %@ named %@", guid, profile[KEY_NAME]);
         [self removeProfileWithGuid:guid fromModel:[_delegate profilePreferencesModel]];
     }
     [[_delegate profilePreferencesModel] flush];
 }
 
 - (void)removeProfileWithGuid:(NSString *)guid fromModel:(ProfileModel *)model {
+    DLog(@"Remove profile with guid %@...", guid);
     if ([model numberOfBookmarks] == 1) {
+        DLog(@"Refusing to remove only profile");
         return;
     }
 
     int lastIndex = [_profilesListView selectedRow];
     [self removeKeyMappingsReferringToGuid:guid];
+    DLog(@"Removing profile from model");
     [[_delegate profilePreferencesModel] removeProfileWithGuid:guid];
-    [_profilesListView reloadData];
+
+    // Ensure all profile list views reload their data to avoid issue 4033.
+    [[NSNotificationCenter defaultCenter] postNotificationName:kProfileWasDeletedNotification object:nil];
 
     int toSelect = lastIndex - 1;
     if (toSelect < 0) {
@@ -479,7 +488,7 @@ NSString *const kProfileSessionNameDidEndEditing = @"kProfileSessionNameDidEndEd
         [newDict removeObjectForKey:KEY_BONJOUR_GROUP];
         [newDict removeObjectForKey:KEY_BONJOUR_SERVICE];
         [newDict removeObjectForKey:KEY_BONJOUR_SERVICE_ADDRESS];
-        newDict[KEY_COMMAND] = @"";
+        newDict[KEY_COMMAND_LINE] = @"";
         newDict[KEY_INITIAL_TEXT] = @"";
         newDict[KEY_CUSTOM_COMMAND] = @"No";
         newDict[KEY_WORKING_DIRECTORY] = @"";
@@ -499,6 +508,15 @@ NSString *const kProfileSessionNameDidEndEditing = @"kProfileSessionNameDidEndEd
 
 - (IBAction)copyToProfile:(id)sender {
     Profile *sourceProfile = [self selectedProfile];
+    NSString *title =
+        [NSString stringWithFormat:@"Replace profile “%@” with the current session's settings?",
+            [iTermProfilePreferences stringForKey:KEY_NAME inProfile:sourceProfile]];
+    if ([iTermWarning showWarningWithTitle:title
+                                   actions:@[ @"Replace", @"Cancel" ]
+                                 identifier:@"NoSyncReplaceProfileWarning"
+                               silenceable:kiTermWarningTypePermanentlySilenceable] == kiTermWarningSelection1) {
+        return;
+    }
     NSString* sourceGuid = sourceProfile[KEY_GUID];
     if (!sourceGuid) {
         return;

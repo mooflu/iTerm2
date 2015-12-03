@@ -26,9 +26,12 @@
  */
 
 #import "DebugLogging.h"
+#import "NSData+iTerm.h"
+#import "NSMutableAttributedString+iTerm.h"
 #import "NSStringITerm.h"
 #import "NSCharacterSet+iTerm.h"
 #import "RegexKitLite.h"
+#import "ScreenChar.h"
 #import <apr-1/apr_base64.h>
 #import <Carbon/Carbon.h>
 #import <wctype.h>
@@ -526,18 +529,8 @@ int decode_utf8_char(const unsigned char *datap,
 }
 
 - (NSString *)stringByBase64DecodingStringWithEncoding:(NSStringEncoding)encoding {
-    const char *buffer = [self UTF8String];
-    int destLength = apr_base64_decode_len(buffer);
-    if (destLength <= 0) {
-        return nil;
-    }
-    
-    NSMutableData *data = [NSMutableData dataWithLength:destLength];
-    char *decodedBuffer = [data mutableBytes];
-    int resultLength = apr_base64_decode(decodedBuffer, buffer);
-    return [[[NSString alloc] initWithBytes:decodedBuffer
-                                     length:resultLength
-                                   encoding:encoding] autorelease];
+    return [[[NSString alloc] initWithData:[NSData dataWithBase64EncodedString:self]
+                                  encoding:encoding] autorelease];
 }
 
 - (NSString *)stringByTrimmingTrailingWhitespace {
@@ -695,50 +688,234 @@ int decode_utf8_char(const unsigned char *datap,
     return [[prefix uppercaseString] stringByAppendingString:suffix];
 }
 
++ (instancetype)stringWithHumanReadableSize:(unsigned long long)value {
+    if (value < 1024) {
+        return nil;
+    }
+    unsigned long long num = value;
+    int pow = 0;
+    BOOL exact = YES;
+    while (num >= 1024 * 1024) {
+        pow++;
+        if (num % 1024 != 0) {
+            exact = NO;
+        }
+        num /= 1024;
+    }
+    // Show 2 fraction digits, always rounding downwards. Printf rounds floats to the nearest
+    // representable value, so do the calculation with integers until we get 100-fold the desired
+    // value, and then switch to float.
+    if (100 * num % 1024 != 0) {
+        exact = NO;
+    }
+    num = 100 * num / 1024;
+    NSArray *iecPrefixes = @[ @"Ki", @"Mi", @"Gi", @"Ti", @"Pi", @"Ei" ];
+    return [NSString stringWithFormat:@"%@%.2f %@",
+               exact ? @"" :@ "≈", (double)num / 100, iecPrefixes[pow]];
+}
+
+- (NSArray<NSString *> *)helpfulSynonyms {
+    NSMutableArray *array = [NSMutableArray array];
+    NSString *hexOrDecimalConversion = [self hexOrDecimalConversionHelp];
+    if (hexOrDecimalConversion) {
+        [array addObject:hexOrDecimalConversion];
+    }
+    NSString *timestampConversion = [self timestampConversionHelp];
+    if (timestampConversion) {
+        [array addObject:timestampConversion];
+    }
+    NSString *utf8Help = [self utf8Help];
+    if (utf8Help) {
+        [array addObject:utf8Help];
+    }
+    if (array.count) {
+        return array;
+    } else {
+        return nil;
+    }
+}
+
+- (NSString *)utf8Help {
+    if (self.length == 0) {
+        return nil;
+    }
+
+    CFRange graphemeClusterRange = CFStringGetRangeOfComposedCharactersAtIndex((CFStringRef)self, 0);
+    if (graphemeClusterRange.location != 0 ||
+        graphemeClusterRange.length != self.length) {
+        // Only works for a single grapheme cluster.
+        return nil;
+    }
+
+    if ([self characterAtIndex:0] < 128 && self.length == 1) {
+        // No help for ASCII
+        return nil;
+    }
+
+    // Convert to UCS-4
+    NSData *data = [self dataUsingEncoding:NSUTF32StringEncoding];
+    const int *characters = (int *)data.bytes;
+    int numCharacters = data.length / 4;
+
+    // Output UTF-8 hex codes
+    NSMutableArray *byteStrings = [NSMutableArray array];
+    const char *utf8 = [self UTF8String];
+    for (size_t i = 0; utf8[i]; i++) {
+        [byteStrings addObject:[NSString stringWithFormat:@"0x%02x", utf8[i] & 0xff]];
+    }
+    NSString *utf8String = [byteStrings componentsJoinedByString:@" "];
+
+    // Output UCS-4 hex codes
+    NSMutableArray *ucs4Strings = [NSMutableArray array];
+    for (NSUInteger i = 0; i < numCharacters; i++) {
+        if (characters[i] == 0xfeff) {
+            // Ignore byte order mark
+            continue;
+        }
+        [ucs4Strings addObject:[NSString stringWithFormat:@"U+%04x", characters[i]]];
+    }
+    NSString *ucs4String = [ucs4Strings componentsJoinedByString:@" "];
+
+    return [NSString stringWithFormat:@"“%@” = %@ = %@ (UTF-8)", self, ucs4String, utf8String];
+}
+
+- (NSString *)timestampConversionHelp {
+    static const NSUInteger kTimestampLength = 10;
+    static const NSUInteger kJavaTimestampLength = 13;
+    if ((self.length == kTimestampLength ||
+         self.length == kJavaTimestampLength) &&
+        [self hasPrefix:@"1"]) {
+        for (int i = 0; i < kTimestampLength; i++) {
+            if (!isdigit([self characterAtIndex:i])) {
+                return nil;
+            }
+        }
+        NSDateFormatter *fmt = [[[NSDateFormatter alloc] init] autorelease];
+        // doubles run out of precision at 2^53. The largest Java timestamp we will convert is less
+        // than 2^41, so this is fine.
+        NSTimeInterval timestamp = [self doubleValue];
+        NSString *template;
+        if (self.length == kJavaTimestampLength) {
+            // Convert milliseconds to seconds
+            timestamp /= 1000.0;
+            template = @"yyyyMMMd hh:mm:ss.SSS z";
+        } else {
+            template = @"yyyyMMMd hh:mm:ss z";
+        }
+        [fmt setDateFormat:[NSDateFormatter dateFormatFromTemplate:template
+                                                           options:0
+                                                            locale:[NSLocale currentLocale]]];
+        return [fmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:timestamp]];
+    } else {
+        return nil;
+    }
+}
+
 - (NSString *)hexOrDecimalConversionHelp {
     unsigned long long value;
+    BOOL mustBePositive = NO;
     BOOL decToHex;
+    BOOL is32bit;
     if ([self hasPrefix:@"0x"] && [self length] <= 18) {
         decToHex = NO;
         NSScanner *scanner = [NSScanner scannerWithString:self];
-        
         [scanner setScanLocation:2]; // bypass 0x
         if (![scanner scanHexLongLong:&value]) {
             return nil;
         }
+        is32bit = [self length] <= 10;
     } else {
         decToHex = YES;
-        value = [self longLongValue];
+        NSDecimalNumber *temp = [NSDecimalNumber decimalNumberWithString:self];
+        if ([temp isEqual:[NSDecimalNumber notANumber]]) {
+            return nil;
+        }
+        NSDecimalNumber *smallestSignedLongLong =
+            [NSDecimalNumber decimalNumberWithString:@"-9223372036854775808"];
+        NSDecimalNumber *largestUnsignedLongLong =
+            [NSDecimalNumber decimalNumberWithString:@"18446744073709551615"];
+        if ([temp doubleValue] > 0) {
+            if ([temp compare:largestUnsignedLongLong] == NSOrderedDescending) {
+                return nil;
+            }
+            mustBePositive = YES;
+            is32bit = ([temp compare:@2147483648LL] == NSOrderedAscending);
+        } else if ([temp compare:smallestSignedLongLong] == NSOrderedAscending) {
+            // Negative but smaller than a signed 64 bit can hold
+            return nil;
+        } else {
+            // Negative but fits in signed 64 bit
+            is32bit = ([temp compare:@-2147483649LL] == NSOrderedDescending);
+        }
+        value = [temp unsignedLongLongValue];
     }
-    if (!value) {
-        return nil;
-    }
-    
-    BOOL is32bit;
-    if (decToHex) {
-        is32bit = ((long long)value >= -2147483648LL && (long long)value <= 2147483647LL);
+
+    NSNumberFormatter *numberFormatter = [[[NSNumberFormatter alloc] init] autorelease];
+    numberFormatter.numberStyle = NSNumberFormatterDecimalStyle;
+
+    NSString *humanReadableSize = [NSString stringWithHumanReadableSize:value];
+    if (humanReadableSize) {
+        humanReadableSize = [NSString stringWithFormat:@" (%@)", humanReadableSize];
     } else {
-        is32bit = [self length] <= 10;
+        humanReadableSize = @"";
     }
-    
+
     if (is32bit) {
         // Value fits in a signed 32-bit value, so treat it as such
-        int intValue = (int)value;
+        int intValue =
+        (int)value;
+        NSString *formattedDecimalValue = [numberFormatter stringFromNumber:@(intValue)];
         if (decToHex) {
-            return [NSString stringWithFormat:@"%d = 0x%x", intValue, intValue];
+            if (intValue < 0) {
+                humanReadableSize = @"";
+            }
+            return [NSString stringWithFormat:@"%@ = 0x%x%@",
+                       formattedDecimalValue, intValue, humanReadableSize];
         } else if (intValue >= 0) {
-            return [NSString stringWithFormat:@"0x%x = %d", intValue, intValue];
+            return [NSString stringWithFormat:@"0x%x = %@%@",
+                       intValue, formattedDecimalValue, humanReadableSize];
         } else {
-            return [NSString stringWithFormat:@"0x%x = %d or %u", intValue, intValue, intValue];
+            unsigned int unsignedIntValue = (unsigned int)value;
+            NSString *formattedUnsignedDecimalValue =
+                [numberFormatter stringFromNumber:@(unsignedIntValue)];
+            return [NSString stringWithFormat:@"0x%x = %@ or %@%@",
+                       intValue, formattedDecimalValue, formattedUnsignedDecimalValue,
+                       humanReadableSize];
         }
     } else {
         // 64-bit value
-        if (decToHex) {
-            return [NSString stringWithFormat:@"%lld = 0x%llx", value, value];
-        } else if ((long long)value >= 0) {
-            return [NSString stringWithFormat:@"0x%llx = %lld", value, value];
+        NSDecimalNumber *decimalNumber;
+        long long signedValue = value;
+        if (!mustBePositive && signedValue < 0) {
+            decimalNumber = [NSDecimalNumber decimalNumberWithMantissa:-signedValue
+                                                              exponent:0
+                                                            isNegative:YES];
         } else {
-            return [NSString stringWithFormat:@"0x%llx = %lld or %llu", value, value, value];
+            decimalNumber = [NSDecimalNumber decimalNumberWithMantissa:value
+                                                              exponent:0
+                                                            isNegative:NO];
+        }
+        NSString *formattedDecimalValue = [numberFormatter stringFromNumber:decimalNumber];
+        if (decToHex) {
+            if (!mustBePositive && signedValue < 0) {
+                humanReadableSize = @"";
+            }
+            return [NSString stringWithFormat:@"%@ = 0x%llx%@",
+                       formattedDecimalValue, value, humanReadableSize];
+        } else if (signedValue >= 0) {
+            return [NSString stringWithFormat:@"0x%llx = %@%@",
+                       value, formattedDecimalValue, humanReadableSize];
+        } else {
+            // Value is negative and converting hex to decimal.
+            NSDecimalNumber *unsignedDecimalNumber =
+                [NSDecimalNumber decimalNumberWithMantissa:value
+                                                  exponent:0
+                                                isNegative:NO];
+            NSString *formattedUnsignedDecimalValue =
+                [numberFormatter stringFromNumber:unsignedDecimalNumber];
+            return [NSString stringWithFormat:@"0x%llx = %@ or %@%@",
+                       value, formattedDecimalValue, formattedUnsignedDecimalValue,
+                       humanReadableSize];
         }
     }
 }
@@ -911,7 +1088,7 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
 }
 
 - (NSString *)stringByExpandingVimSpecialCharacters {
-    typedef enum {
+    enum {
         kSpecialCharacterThreeDigitOctal,  // \...    three-digit octal number (e.g., "\316")
         kSpecialCharacterTwoDigitOctal,    // \..     two-digit octal number (must be followed by non-digit)
         kSpecialCharacterOneDigitOctal,    // \.      one-digit octal number (must be followed by non-digit)
@@ -928,8 +1105,8 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
         kSpecialCharacterDoubleQuote,      // \"      double quote
         kSpecialCharacterControlKey,       // \<C-W>  Control key
         kSpecialCharacterMetaKey,          // \<M-W>  Meta key
-    } SpecialCharacter;
-    
+    };
+
     NSDictionary *regexes =
         @{ @"^(([0-7]{3}))": @(kSpecialCharacterThreeDigitOctal),
            @"^(([0-7]{2}))(?:[^0-8]|$)": @(kSpecialCharacterTwoDigitOctal),
@@ -1040,32 +1217,7 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
 - (CGFloat)heightWithAttributes:(NSDictionary *)attributes constrainedToWidth:(CGFloat)maxWidth {
     NSAttributedString *attributedString =
         [[[NSAttributedString alloc] initWithString:self attributes:attributes] autorelease];
-    if (![self length]) {
-        return 0;
-    }
-
-    NSSize size = NSMakeSize(maxWidth, FLT_MAX);
-    NSTextContainer *textContainer =
-        [[[NSTextContainer alloc] initWithContainerSize:size] autorelease];
-    NSTextStorage *textStorage =
-        [[[NSTextStorage alloc] initWithAttributedString:attributedString] autorelease];
-    NSLayoutManager *layoutManager = [[[NSLayoutManager alloc] init] autorelease];
-
-    [layoutManager addTextContainer:textContainer];
-    [textStorage addLayoutManager:layoutManager];
-    [layoutManager setHyphenationFactor:0.0];
-    
-    // Force layout.
-    [layoutManager glyphRangeForTextContainer:textContainer];
-    
-    // Don't count space added for insertion point.
-    CGFloat height =
-        [layoutManager usedRectForTextContainer:textContainer].size.height;
-    const CGFloat extraLineFragmentHeight =
-        [layoutManager extraLineFragmentRect].size.height;
-    height -= MAX(0, extraLineFragmentHeight);
-
-    return height;
+    return [attributedString heightForWidth:maxWidth];
 }
 
 - (NSArray *)keyValuePair {
@@ -1266,6 +1418,28 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
     } else {
         return YES;
     }
+}
+
+- (void)enumerateComposedCharacters:(void (^)(NSRange, unichar, NSString *, BOOL *))block {
+    if (self.length == 0) {
+        return;
+    }
+    CFIndex index = 0;
+    NSRange range;
+    do {
+        CFRange tempRange = CFStringGetRangeOfComposedCharactersAtIndex((CFStringRef)self, index);
+        range = NSMakeRange(tempRange.location, tempRange.length);
+        if (range.length > 0) {
+            unichar simple = range.length == 1 ? [self characterAtIndex:range.location] : 0;
+            NSString *complexString = range.length == 1 ? nil : [self substringWithRange:range];
+            BOOL stop = NO;
+            block(range, simple, complexString, &stop);
+            if (stop) {
+                return;
+            }
+        }
+        index = NSMaxRange(range);
+    } while (NSMaxRange(range) < self.length);
 }
 
 @end

@@ -35,7 +35,7 @@
                         kTipBodyKey: @"If you close a session, tab, or window by accident you can undo it with “Edit > Undo” (⌘Z). By default you have five seconds to undo, but you can adjust that timeout in “Prefs > Profiles > Session.”" },
 
             @"0005": @{ kTipTitleKey: @"Annotations",
-                         kTipBodyKey: @"Want to mark up your scrollback history? Right click on a selection and choose “Annotate Selection” to add a personal note to it. Use “Edit > Toggle Annotations” to show or hide them, and look in “View > Marks” and Annotations for more things you can do." },
+                         kTipBodyKey: @"Want to mark up your scrollback history? Right click on a selection and choose “Annotate Selection” to add a personal note to it. Use “View > Show Annotations” to show or hide them, and look in “Edit > Marks and Annotations” for more things you can do." },
 
             @"0006": @{ kTipTitleKey: @"Copy with Styles",
                          kTipBodyKey: @"Copy a selection with ⌥⌘C to include styles such as colors and fonts. You can make this the default action for Copy in “Prefs > Advanced.”" },
@@ -139,7 +139,7 @@
                         kTipBodyKey: @"If you want the visual bell to flash the whole screen instead of show a bell icon, you can turn that on in “Prefs > Advanced.”" },
 
             @"0033": @{ kTipTitleKey: @"Tab Menu",
-                        kTipBodyKey: @"Right click on a tab to change its color, close tabs to the right, or to close all other tabs." },
+                        kTipBodyKey: @"Right click on a tab to change its color, close tabs after it, or to close all other tabs." },
 
             @"0034": @{ kTipTitleKey: @"Tags",
                         kTipBodyKey: @"You can assign tags to your profiles, and by clicking “Tags>” anywhere you see a list of profiles you can browse those tags." },

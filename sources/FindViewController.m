@@ -55,7 +55,7 @@ const CGFloat kEdgeWidth = 3;
     BOOL _needsAnimation;
 }
 
-- (id)initTextCell:(NSString *)aString  {
+- (instancetype)initTextCell:(NSString *)aString  {
     self = [super initTextCell:aString];
     if (self) {
         _alphaMultiplier = 1;
@@ -63,7 +63,7 @@ const CGFloat kEdgeWidth = 3;
     return self;
 }
 
-- (id)initWithCoder:(NSCoder *)aDecoder {
+- (instancetype)initWithCoder:(NSCoder *)aDecoder {
     self = [super initWithCoder:aDecoder];
     if (self) {
         _alphaMultiplier = 1;
@@ -71,7 +71,7 @@ const CGFloat kEdgeWidth = 3;
     return self;
 }
 
-- (id)initImageCell:(NSImage *)image {
+- (instancetype)initImageCell:(NSImage *)image {
     self = [super initImageCell:image];
     if (self) {
         _alphaMultiplier = 1;
@@ -268,7 +268,7 @@ const CGFloat kEdgeWidth = 3;
 
 @implementation FindState
 
-- (id)init {
+- (instancetype)init {
     self = [super init];
     if (self) {
         _string = [@"" retain];
@@ -283,6 +283,9 @@ const CGFloat kEdgeWidth = 3;
 
 @end
 
+@interface FindViewController()<NSSearchFieldDelegate>
+@end
+
 @implementation FindViewController {
     IBOutlet NSSearchField* findBarTextField_;
     // These pointers are just "prototypes" and do not refer to any actual menu
@@ -292,9 +295,6 @@ const CGFloat kEdgeWidth = 3;
 
     FindState *savedState_;
     FindState *state_;
-
-    // Find happens incrementally. This remembers the string to search for.
-    NSMutableString* previousFindString_;
 
     // Find runs out of a timer so that if you have a huge buffer then it
     // doesn't lock up. This timer runs the show.
@@ -329,11 +329,9 @@ const CGFloat kEdgeWidth = 3;
     gDefaultRegex = [[NSUserDefaults standardUserDefaults] boolForKey:@"findRegex_iTerm"];
 }
 
-- (id)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil
-{
+- (instancetype)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil {
     self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
     if (self) {
-        previousFindString_ = [[NSMutableString alloc] init];
         [findBarTextField_ setDelegate:self];
         state_ = [[FindState alloc] init];
         state_.ignoreCase = gDefaultIgnoresCase;
@@ -348,14 +346,12 @@ const CGFloat kEdgeWidth = 3;
     return self;
 }
 
-- (void)dealloc
-{
+- (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     if (timer_) {
         [timer_ invalidate];
         timer_ = nil;
     }
-    [previousFindString_ release];
     [state_ release];
     [savedState_ release];
     [super dealloc];
@@ -681,7 +677,6 @@ const CGFloat kEdgeWidth = 3;
     state_.regex = regex;
     state_.string = string;
     findBarTextField_.stringValue = string;
-    [previousFindString_ setString:@""];
     [self doSearch];
 }
 
@@ -839,15 +834,6 @@ const CGFloat kEdgeWidth = 3;
                                                             object:nil];
     }
     // Search.
-    if ([previousFindString_ length] == 0) {
-        [delegate_ resetFindCursor];
-    } else {
-        NSRange range =  [theString rangeOfString:previousFindString_];
-        if (range.location != 0) {
-            [delegate_ resetFindCursor];
-        }
-    }
-    [previousFindString_ setString:theString];
     [self _setSearchDefaults];
     [self findSubString:theString
        forwardDirection:NO
@@ -910,15 +896,13 @@ const CGFloat kEdgeWidth = 3;
     }
 }
 
-- (void)controlTextDidEndEditing:(NSNotification *)aNotification
-{
+- (void)controlTextDidEndEditing:(NSNotification *)aNotification {
     NSControl *postingObject = [aNotification object];
     if (postingObject != findBarTextField_) {
         return;
     }
 
     int move = [[[aNotification userInfo] objectForKey:@"NSTextMovement"] intValue];
-    [previousFindString_ setString:@""];
     switch (move) {
         case NSOtherTextMovement:
             // Focus lost

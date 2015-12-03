@@ -23,6 +23,8 @@
  */
 
 #import "ProfileListView.h"
+
+#import "DebugLogging.h"
 #import "ITAddressBookMgr.h"
 #import "PTYSession.h"
 #import "ProfileModel.h"
@@ -35,12 +37,14 @@
 
 #define kProfileTableViewDataType @"iTerm2ProfileGuid"
 
+NSString *const kProfileWasDeletedNotification = @"kProfileWasDeletedNotification";
+
 const int kSearchWidgetHeight = 22;
 const int kInterWidgetMargin = 10;
 const CGFloat kTagsViewWidth = 0;  // TODO: remember this for each superview
 const CGFloat kDefaultTagsWidth = 80;
 
-@interface ProfileListView () <ProfileTagsViewDelegate>
+@interface ProfileListView () <NSSearchFieldDelegate, ProfileTagsViewDelegate>
 @end
 
 @implementation ProfileListView {
@@ -52,7 +56,7 @@ const CGFloat kDefaultTagsWidth = 80;
     NSTableColumn* commandColumn_;
     NSTableColumn* shortcutColumn_;
     NSTableColumn* tagsColumn_;
-    NSObject<ProfileListViewDelegate> *delegate_;
+    id<ProfileListViewDelegate> delegate_;
     NSSet* selectedGuids_;
     BOOL debug;
     ProfileModelWrapper *dataSource_;
@@ -62,20 +66,18 @@ const CGFloat kDefaultTagsWidth = 80;
     CGFloat lastTagsWidth_;
 }
 
-- (id)initWithFrame:(NSRect)frameRect
-{
+- (instancetype)initWithFrame:(NSRect)frameRect {
     return [self initWithFrame:frameRect model:[ProfileModel sharedInstance]];
 }
 
 // This is the designated initializer.
-- (id)initWithFrame:(NSRect)frameRect model:(ProfileModel*)dataSource
-{
+- (instancetype)initWithFrame:(NSRect)frameRect model:(ProfileModel*)dataSource {
     self = [super initWithFrame:frameRect];
     if (self) {
         margin_ = kInterWidgetMargin;
         [self setUnderlyingDatasource:dataSource];
         debug = NO;
-        
+
         NSRect frame = [self frame];
         NSRect searchFieldFrame;
         searchFieldFrame.origin.x = 0;
@@ -87,7 +89,7 @@ const CGFloat kDefaultTagsWidth = 80;
         [searchField_ setDelegate:self];
         [self addSubview:searchField_];
         self.delegate = nil;
-        
+
         // Split view ------------------------------------------------------------------------------
         NSRect splitViewFrame = NSMakeRect(0,
                                            0,
@@ -98,7 +100,7 @@ const CGFloat kDefaultTagsWidth = 80;
         splitView_.autoresizesSubviews = NO;
         splitView_.delegate = self;
         [self addSubview:splitView_];
-        
+
         // Scroll view -----------------------------------------------------------------------------
         NSRect scrollViewFrame;
         scrollViewFrame.origin.x = kTagsViewWidth + kInterWidgetMargin;
@@ -107,7 +109,7 @@ const CGFloat kDefaultTagsWidth = 80;
         scrollViewFrame.size.height = splitViewFrame.size.height;
         scrollView_ = [[NSScrollView alloc] initWithFrame:scrollViewFrame];
         [scrollView_ setHasVerticalScroller:YES];
-        
+
         // Table view ------------------------------------------------------------------------------
         NSRect tableViewFrame;
         tableViewFrame.origin.x = 0;
@@ -146,20 +148,24 @@ const CGFloat kDefaultTagsWidth = 80;
         selectedGuids_ = [[NSMutableSet alloc] init];
 
         [tableView_ setDoubleAction:@selector(onDoubleClick:)];
-        
+
         NSTableHeaderView* header = [[[NSTableHeaderView alloc] init] autorelease];
         [tableView_ setHeaderView:header];
         [[tableColumn_ headerCell] setStringValue:@"Profile Name"];
-        
+
         [tableView_ sizeLastColumnToFit];
-        
+
         [searchField_ setArrowHandler:tableView_];
-        
+
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(reloadData)
+                                                     name:kProfileWasDeletedNotification
+                                                   object:nil];
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(dataChangeNotification:)
                                                      name:kReloadAddressBookNotification
                                                    object:nil];
-        
+
         // Tags view -------------------------------------------------------------------------------
         NSRect tagsViewFrame = NSMakeRect(0, 0, kTagsViewWidth, splitViewFrame.size.height);
         lastTagsWidth_ = kDefaultTagsWidth;
@@ -263,7 +269,7 @@ const CGFloat kDefaultTagsWidth = 80;
     // reloaded. This will cause a sync so it must be done after pushing the
     // local ordering to the underlying model.
     if ([[tableView_ sortDescriptors] count] > 0) {
-        [tableView_ setSortDescriptors:[NSArray arrayWithObjects:nil]];
+        [tableView_ setSortDescriptors:@[]];
     }
 
     // The underlying model doesn't post a change notification for each bookmark
@@ -299,7 +305,7 @@ const CGFloat kDefaultTagsWidth = 80;
     NSString *trimmedSearchString = [[searchField_ stringValue] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
     NSString *searchStringPlusTag = [NSString stringWithFormat:@"%@ tag:%@", trimmedSearchString, tag];
     [searchField_ setStringValue:[searchStringPlusTag stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]]];
-    [self controlTextDidChange:nil];
+    [self controlTextDidChange:[NSNotification notificationWithName:NSControlTextDidChangeNotification object:nil]];
 }
 
 - (void)_addTags:(NSArray*)tags toSearchField:(NSSearchField*)searchField
@@ -438,7 +444,7 @@ const CGFloat kDefaultTagsWidth = 80;
     }
     if ([sortDescriptors count] > 0) {
         NSSortDescriptor* primarySortDesc = [sortDescriptors objectAtIndex:0];
-        [aTableView setIndicatorImage:([primarySortDesc ascending] ? 
+        [aTableView setIndicatorImage:([primarySortDesc ascending] ?
                                        [NSImage imageNamed:@"NSAscendingSortIndicator"] :
                                        [NSImage imageNamed:@"NSDescendingSortIndicator"])
                         inTableColumn:[aTableView tableColumnWithIdentifier:[primarySortDesc key]]];
@@ -553,6 +559,8 @@ const CGFloat kDefaultTagsWidth = 80;
     Profile* bookmark = [dataSource_ profileAtIndex:rowIndex];
 
     if (aTableColumn == tableColumn_) {
+        DLog(@"Getting name of profile at row %d. The dictionary's address is %p. Its name is %@",
+             (int)rowIndex, bookmark, bookmark[KEY_NAME]);
         Profile *defaultProfile = [[ProfileModel sharedInstance] defaultBookmark];
         return [self attributedStringForName:bookmark[KEY_NAME]
                                         tags:bookmark[KEY_TAGS]
@@ -564,7 +572,7 @@ const CGFloat kDefaultTagsWidth = 80;
         if (![[bookmark objectForKey:KEY_CUSTOM_COMMAND] isEqualToString:@"Yes"]) {
             theString = @"Login shell";
         } else {
-            theString = [bookmark objectForKey:KEY_COMMAND];
+            theString = [bookmark objectForKey:KEY_COMMAND_LINE];
         }
         return [self attributedStringForString:theString
                                       selected:[[tableView_ selectedRowIndexes] containsIndex:rowIndex]];
@@ -585,8 +593,7 @@ const CGFloat kDefaultTagsWidth = 80;
 }
 
 // Delegate methods
-- (void)tableView:(NSTableView *)aTableView didClickTableColumn:(NSTableColumn *)aTableColumn 
-{
+- (void)tableView:(NSTableView *)aTableView didClickTableColumn:(NSTableColumn *)aTableColumn {
     NSMutableArray* newSortDescriptors = [NSMutableArray arrayWithArray:[tableView_ sortDescriptors]];
     BOOL done = NO;
     BOOL ascending = YES;
@@ -608,7 +615,7 @@ const CGFloat kDefaultTagsWidth = 80;
     if (!done) {
         // This column was not previously sorted. Add it to the head of the array.
         [newSortDescriptors insertObject:[[[NSSortDescriptor alloc] initWithKey:[aTableColumn identifier]
-                                                                      ascending:YES] autorelease] 
+                                                                      ascending:YES] autorelease]
                                  atIndex:0];
     }
     [tableView_ setSortDescriptors:newSortDescriptors];
@@ -659,15 +666,15 @@ const CGFloat kDefaultTagsWidth = 80;
     [self setHasSelection:[selectedGuids_ count] > 0];
 }
 
-- (int)selectedRow
-{
+- (NSInteger)selectedRow {
     return [tableView_ selectedRow];
 }
 
-- (void)reloadData
-{
+- (void)reloadData {
+    DLog(@"ProfileListView reloadData called");
     [self _addTags:[[dataSource_ underlyingModel] allTags] toSearchField:searchField_];
     [dataSource_ sync];
+    DLog(@"calling reloadData on the profile tableview");
     [tableView_ reloadData];
     if (self.delegate && ![selectedGuids_ isEqualToSet:[self selectedGuids]]) {
         [selectedGuids_ release];
@@ -696,8 +703,7 @@ const CGFloat kDefaultTagsWidth = 80;
     [self selectRowIndex:theRow];
 }
 
-- (int)numberOfRows
-{
+- (NSInteger)numberOfRows {
     return [dataSource_ numberOfBookmarks];
 }
 
@@ -792,8 +798,8 @@ const CGFloat kDefaultTagsWidth = 80;
     [tableView_ sizeLastColumnToFit];
 }
 
-- (void)dataChangeNotification:(id)sender
-{
+- (void)dataChangeNotification:(id)sender {
+    DLog(@"Scheduling a delayed perform of reloadData");
     // Use a delayed perform so the underlying model has a chance to parse its journal.
     [self performSelector:@selector(reloadData)
                withObject:nil
@@ -807,10 +813,10 @@ const CGFloat kDefaultTagsWidth = 80;
     }
 }
 
-- (void)eraseQuery
-{
+- (void)eraseQuery {
     [searchField_ setStringValue:@""];
-    [self controlTextDidChange:nil];
+    [self controlTextDidChange:[NSNotification notificationWithName:NSControlTextDidChangeNotification
+                                                             object:nil]];
 }
 
 - (void)resizeSubviewsWithOldSize:(NSSize)oldBoundsSize

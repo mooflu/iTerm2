@@ -59,7 +59,6 @@ NSString *const kPreferenceKeyHideTabBar = @"HideTab";
 NSString *const kPreferenceKeyHideTabNumber = @"HideTabNumber";
 NSString *const kPreferenceKeyHideTabCloseButton = @"HideTabCloseButton";
 NSString *const kPreferenceKeyHideTabActivityIndicator = @"HideActivityIndicator";
-NSString *const kPreferenceKeyTimeToHoldCmdToShowTabsInFullScreen = @"FsTabDelay";
 NSString *const kPreferenceKeyShowPaneTitles = @"ShowPaneTitles";
 NSString *const kPreferenceKeyHideMenuBarInFullscreen = @"HideMenuBarInFullscreen";
 NSString *const kPreferenceKeyFlashTabBarInFullscreen = @"FlashTabBarInFullscreen";
@@ -112,6 +111,8 @@ NSString *const kPreferenceKeyPasteSpecialRemoveControlCodes = @"RemoveControlCo
 NSString *const kPreferenceKeyPasteSpecialBracketedPasteMode = @"BracketedPasteMode";
 
 NSString *const kPreferenceKeyPasteWarningNumberOfSpacesPerTab = @"PasteTabToStringTabStopSize";
+
+NSString *const kPreferenceKeyShowFullscreenTabBar = @"ShowFullScreenTabBar";
 
 static NSMutableDictionary *gObservers;
 
@@ -207,7 +208,6 @@ static NSMutableDictionary *gObservers;
                   kPreferenceKeyHideTabNumber: @NO,
                   kPreferenceKeyHideTabCloseButton: @NO,
                   kPreferenceKeyHideTabActivityIndicator: @NO,
-                  kPreferenceKeyTimeToHoldCmdToShowTabsInFullScreen: @1.0,
                   kPreferenceKeyShowPaneTitles: @YES,
                   kPreferenceKeyHideMenuBarInFullscreen:@YES,
                   kPreferenceKeyFlashTabBarInFullscreen:@YES,
@@ -259,6 +259,7 @@ static NSMutableDictionary *gObservers;
                   kPreferenceKeyPasteSpecialBracketedPasteMode: @YES,
 
                   kPreferenceKeyPasteWarningNumberOfSpacesPerTab: @4,
+                  kPreferenceKeyShowFullscreenTabBar: @YES
               };
         [dict retain];
     }
@@ -282,6 +283,7 @@ static NSMutableDictionary *gObservers;
             return ([defaultValue isKindOfClass:[NSNumber class]] &&
                     [defaultValue doubleValue] == ceil([defaultValue doubleValue]));
         case kPreferenceInfoTypeCheckbox:
+        case kPreferenceInfoTypeInvertedCheckbox:
             return ([defaultValue isKindOfClass:[NSNumber class]] &&
                     ([defaultValue intValue] == YES ||
                      [defaultValue intValue] == NO));
