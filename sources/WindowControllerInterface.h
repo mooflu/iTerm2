@@ -3,6 +3,7 @@
 #import <Cocoa/Cocoa.h>
 #import "ProfileModel.h"
 #import "PTYTabDelegate.h"
+#import "PTYWindow.h"
 
 @class iTermPopupWindowController;
 @class PSMTabBarControl;
@@ -104,6 +105,7 @@ typedef NS_ENUM(NSInteger, BroadcastMode) {
 
 // Underlying window
 - (NSWindow *)window;
+- (PTYWindow *)ptyWindow;
 
 // Unique identifier
 - (NSString *)terminalGuid;
@@ -175,6 +177,12 @@ typedef NS_ENUM(NSInteger, BroadcastMode) {
 // Move tabs within ordering.
 - (void)moveTabLeft:(id)sender;
 - (void)moveTabRight:(id)sender;
+
+// Increase and Decrease
+- (void)increaseHeight:(id)sender;
+- (void)decreaseHeight:(id)sender;
+- (void)increaseWidth:(id)sender;
+- (void)decreaseWidth:(id)sender;
 
 // If soft is true, don't kill tmux session. Otherwise is just like closeTab.
 - (void)closeTab:(PTYTab *)aTab soft:(BOOL)soft;

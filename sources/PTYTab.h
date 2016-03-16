@@ -210,12 +210,11 @@
 
 - (void)addHiddenLiveView:(SessionView *)hiddenLiveView;
 
-#pragma mark NSSplitView delegate methods
-- (void)splitViewDidResizeSubviews:(NSNotification *)aNotification;
-// This is the implementation of splitViewDidResizeSubviews. The delegate method isn't called when
-// views are added or adjusted, so we often have to call this ourselves.
-- (void)_splitViewDidResizeSubviews:(NSSplitView*)splitView;
-- (CGFloat)splitView:(NSSplitView *)splitView constrainSplitPosition:(CGFloat)proposedPosition ofSubviewAt:(NSInteger)dividerIndex;
-- (void)_recursiveRemoveView:(NSView*)theView;
+// Update the tab's title from the active session's name. Needed for initialzing the tab's title
+// after setting up tmux tabs.
+- (void)loadTitleFromSession;
+
+// Update icons in tab.
+- (void)updateIcon;
 
 @end

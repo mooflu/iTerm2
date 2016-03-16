@@ -19,6 +19,8 @@
 @protocol iTermToolbeltViewDelegate<NSObject>
 
 - (CGFloat)growToolbeltBy:(CGFloat)amount;
+// Dragging of the toolbelt's handle finished.
+- (void)toolbeltDidFinishGrowing;
 - (void)toolbeltUpdateMouseCursor;
 - (void)toolbeltInsertText:(NSString *)text;
 - (VT100RemoteHost *)toolbeltCurrentHost;
@@ -58,7 +60,7 @@
 @interface iTermToolWrapper : NSView
 
 @property(nonatomic, copy) NSString *name;
-@property(nonatomic, readonly) __weak NSView *container;
+@property(nonatomic, readonly) NSView *container;
 @property(nonatomic, assign) id<ToolWrapperDelegate> delegate;
 @property(nonatomic, readonly) id<ToolbeltTool> tool;
 @property(nonatomic, readonly) CGFloat minimumHeight;

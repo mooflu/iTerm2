@@ -205,18 +205,20 @@
     XCTAssert(lineNumber.length == 0);
 }
 
-- (void)testGetFullPathStripsParens {
-    NSString *lineNumber = nil;
-    static NSString *const kFilename = @"/path/to/file";
-    NSString *kFilenameWithParens = [NSString stringWithFormat:@"(%@)", kFilename];
-    static NSString *const kWorkingDirectory = @"/working/directory";
-    [_semanticHistoryController.fakeFileManager.files addObject:kFilename];
-    NSString *actual = [_semanticHistoryController getFullPath:kFilenameWithParens
-                                              workingDirectory:kWorkingDirectory
-                                                    lineNumber:&lineNumber];
-    NSString *expected = kFilename;
-    XCTAssert([expected isEqualToString:actual]);
-    XCTAssert(lineNumber.length == 0);
+- (void)testGetFullPathStripsDelimiters {
+    for (NSString *delimiters in @[ @"()", @"<>", @"[]", @"{}", @"''", @"\"\"" ]) {
+        NSString *lineNumber = nil;
+        static NSString *const kFilename = @"/path/to/file";
+        NSString *kFilenameWithParens = [NSString stringWithFormat:@"%C%@%C", [delimiters characterAtIndex:0], kFilename, [delimiters characterAtIndex:1]];
+        static NSString *const kWorkingDirectory = @"/working/directory";
+        [_semanticHistoryController.fakeFileManager.files addObject:kFilename];
+        NSString *actual = [_semanticHistoryController getFullPath:kFilenameWithParens
+                                                  workingDirectory:kWorkingDirectory
+                                                        lineNumber:&lineNumber];
+        NSString *expected = kFilename;
+        assert([expected isEqualToString:actual]);
+        assert(lineNumber.length == 0);
+    }
 }
 
 - (void)testGetFullPathStripsTrailingPunctuation {
@@ -480,6 +482,28 @@
                                                           kSemanticHistoryWorkingDirectorySubstitutionKey: @"/" }];
     XCTAssert(opened);
     NSString *expectedUrlString = [NSString stringWithFormat:@"mvim://open?url=file://%@",
+                                   kExistingFileAbsolutePath];
+    XCTAssert([_semanticHistoryController.openedURL isEqualTo:[NSURL URLWithString:expectedUrlString]]);
+    XCTAssert([_semanticHistoryController.openedEditor isEqualToString:kMacVimIdentifier]);
+}
+
+// Open a file with a line number in the default app, which happens to be MacVim.
+- (void)testOpenPathOpensTextFileInDefaultAppWithLineNumber {
+    _semanticHistoryController.prefs =
+      @{ kSemanticHistoryActionKey: kSemanticHistoryBestEditorAction };
+    NSString *kExistingFileAbsolutePath = @"/file/that/exists";
+    NSString *fileWithLineNumber = [kExistingFileAbsolutePath stringByAppendingString:@":12"];
+    [_semanticHistoryController.fakeFileManager.files addObject:kExistingFileAbsolutePath];
+    _semanticHistoryController.defaultAppIsEditor = YES;
+    _semanticHistoryController.bundleIdForDefaultApp = kMacVimIdentifier;  // Act like macvim is the default for this kind of file
+
+    BOOL opened = [_semanticHistoryController openPath:fileWithLineNumber
+                                      workingDirectory:@"/"
+                                         substitutions:@{ kSemanticHistoryPrefixSubstitutionKey: @"Prefix",
+                                                          kSemanticHistorySuffixSubstitutionKey: @"Suffix",
+                                                          kSemanticHistoryWorkingDirectorySubstitutionKey: @"/" }];
+    XCTAssert(opened);
+    NSString *expectedUrlString = [NSString stringWithFormat:@"mvim://open?url=file://%@&line=12",
                                    kExistingFileAbsolutePath];
     XCTAssert([_semanticHistoryController.openedURL isEqualTo:[NSURL URLWithString:expectedUrlString]]);
     XCTAssert([_semanticHistoryController.openedEditor isEqualToString:kMacVimIdentifier]);

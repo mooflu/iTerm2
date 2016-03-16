@@ -360,6 +360,14 @@ const CGFloat kDefaultTagsWidth = 80;
     dataSource_.lockedGuid = [self selectedGuid];
 }
 
+- (void)selectLockedSelection {
+    NSInteger theIndex = [dataSource_ indexOfProfileWithGuid:dataSource_.lockedGuid];
+    if (theIndex < 0) {
+        return;
+    }
+    [tableView_ selectRowIndexes:[NSIndexSet indexSetWithIndex:theIndex] byExtendingSelection:NO];
+}
+
 - (void)unlockSelection {
     dataSource_.lockedGuid = nil;
 }
@@ -495,7 +503,11 @@ const CGFloat kDefaultTagsWidth = 80;
     NSColor *tagColor;
     NSColor *highlightedBackgroundColor;
     if (selected) {
-        textColor = [NSColor whiteColor];
+        if ([NSApp isActive] && self.window.isKeyWindow) {
+            textColor = [NSColor whiteColor];
+        } else {
+            textColor = [NSColor blackColor];
+        }
         tagColor = [NSColor whiteColor];
         highlightedBackgroundColor = [NSColor colorWithCalibratedRed:1 green:1 blue:0 alpha:0.4];
     } else {
@@ -549,7 +561,7 @@ const CGFloat kDefaultTagsWidth = 80;
 
 - (NSAttributedString *)attributedStringForString:(NSString *)string selected:(BOOL)selected {
     NSDictionary *attributes = @{ NSFontAttributeName: [NSFont systemFontOfSize:[NSFont systemFontSize]],
-                                  NSForegroundColorAttributeName: selected ? [NSColor whiteColor] : [NSColor blackColor] };
+                                  NSForegroundColorAttributeName: (selected && [NSApp isActive] && self.window.isKeyWindow) ? [NSColor whiteColor] : [NSColor blackColor] };
     return [[[NSAttributedString alloc] initWithString:string attributes:attributes] autorelease];
 }
 
@@ -764,6 +776,14 @@ const CGFloat kDefaultTagsWidth = 80;
 - (void)controlTextDidChange:(NSNotification *)aNotification {
     dataSource_.lockedGuid = nil;
     [self updateResultsForSearch];
+}
+
+- (NSArray *)control:(NSControl *)control
+            textView:(NSTextView *)textView
+         completions:(NSArray *)words
+ forPartialWordRange:(NSRange)charRange
+ indexOfSelectedItem:(NSInteger *)index {
+    return @[];
 }
 
 - (void)updateResultsForSearch

@@ -161,12 +161,14 @@
     if (row >= 0) {
         id object = [self.model objectAtIndex:row];
         if ([object isKindOfClass:[PTYSession class]]) {
+            // Switch to session
             PTYSession *session = object;
             if (session) {
                 NSWindowController<iTermWindowController> *term = session.tab.realParentWindow;
                 [term makeSessionActive:session];
             }
         } else if ([object isKindOfClass:[Profile class]]) {
+            // Create a new tab/window
             Profile *profile = object;
             iTermController *controller = [iTermController sharedInstance];
             [controller launchBookmark:profile
@@ -174,10 +176,27 @@
                                withURL:nil
                               isHotkey:NO
                                makeKey:YES
+                           canActivate:YES
                                command:nil
                                  block:nil];
         } else if ([object isKindOfClass:[NSString class]]) {
+            // Load window arrangement
             [[iTermController sharedInstance] loadWindowArrangementWithName:object];
+        } else if ([object isKindOfClass:[iTermOpenQuicklyChangeProfileItem class]]) {
+            // Change profile
+            PseudoTerminal *term = [[iTermController sharedInstance] currentTerminal];
+            PTYSession *session = term.currentSession;
+            NSString *guid = [object identifier];
+            Profile *profile = [[ProfileModel sharedInstance] bookmarkWithGuid:guid];
+            if (profile) {
+                [session setProfile:profile preservingName:YES];
+                // Make sure the OS doesn't pick some random window to make key
+                [term.window makeKeyAndOrderFront:nil];
+            }
+        } else if ([object isKindOfClass:[iTermOpenQuicklyHelpItem class]]) {
+            _textField.stringValue = [object identifier];
+            [self update];
+            return;
         }
     }
 
@@ -278,6 +297,25 @@
         default:
             break;
     }
+}
+
+// This makes ^N and ^P work.
+- (BOOL)control:(NSControl*)control textView:(NSTextView*)textView doCommandBySelector:(SEL)commandSelector {
+    BOOL result = NO;
+    
+    if (commandSelector == @selector(moveUp:) || commandSelector == @selector(moveDown:)) {
+        NSInteger row = [_table selectedRow];
+        if (row < 0) {
+            row = 0;
+        } else if (commandSelector == @selector(moveUp:) && row > 0) {
+            row--;
+        } else if (commandSelector == @selector(moveDown:) && row + 1 < _table.numberOfRows) {
+            row++;
+        }
+        [_table selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:NO];
+        result = YES;
+    }
+    return result;
 }
 
 #pragma mark - iTermOpenQuicklyTextFieldDelegate

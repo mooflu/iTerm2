@@ -28,12 +28,14 @@
 #import <Cocoa/Cocoa.h>
 #import <Carbon/Carbon.h>
 #import "DebugLogging.h"
+#import "iTermApplication.h"
 
 @class PTYSession;
 @class PseudoTerminal;
 
 extern NSString *kUseBackgroundPatternIndicatorChangedNotification;
 extern NSString *const kMultiLinePasteWarningUserDefaultsKey;
+extern NSString *const kPasteOneLineWithNewlineAtShellWarningUserDefaultsKey;
 extern NSString *const kSavedArrangementDidChangeNotification;
 extern NSString *const kNonTerminalWindowBecameKeyNotification;
 
@@ -90,12 +92,8 @@ int DebugLogImpl(const char *file, int line, const char *function, NSString* val
 
 - (IBAction)showPrefWindow:(id)sender;
 - (IBAction)showBookmarkWindow:(id)sender;
-- (IBAction)instantReplayPrev:(id)sender;
-- (IBAction)instantReplayNext:(id)sender;
 
     // navigation
-- (IBAction)previousTerminal: (id) sender;
-- (IBAction)nextTerminal: (id) sender;
 - (IBAction)arrangeHorizontally:(id)sender;
 
 // Notifications

@@ -24,6 +24,7 @@
 
 #import "iTermSemanticHistoryController.h"
 #import "DebugLogging.h"
+#import "iTermLaunchServices.h"
 #import "iTermSemanticHistoryPrefsController.h"
 #import "NSFileManager+iTerm.h"
 #import "NSStringITerm.h"
@@ -39,6 +40,7 @@ NSString *const kSemanticHistoryWorkingDirectorySubstitutionKey = @"semanticHist
 @synthesize prefs = prefs_;
 @synthesize delegate = delegate_;
 
+
 - (NSString *)getFullPath:(NSString *)path
          workingDirectory:(NSString *)workingDirectory
                lineNumber:(NSString **)lineNumber {
@@ -50,11 +52,8 @@ NSString *const kSemanticHistoryWorkingDirectorySubstitutionKey = @"semanticHist
         return nil;
     }
 
-    // If it's in parens, strip them.
-    if (path.length > 2 && [path characterAtIndex:0] == '(' && [path hasSuffix:@")"]) {
-        path = [path substringWithRange:NSMakeRange(1, path.length - 2)];
-        DLog(@" Strip parens, leaving %@", path);
-    }
+    // If it's in any form of bracketed delimiters, strip them
+    path = [path stringByRemovingEnclosingBrackets];
 
     // strip various trailing characters that are unlikely to be part of the file name.
     path = [path stringByReplacingOccurrencesOfRegex:@"[.),:]$"
@@ -172,20 +171,20 @@ NSString *const kSemanticHistoryWorkingDirectorySubstitutionKey = @"semanticHist
 - (void)openFile:(NSString *)path
     inEditorWithBundleId:(NSString *)identifier
           lineNumber:(NSString *)lineNumber {
-    if ([self preferredEditorIdentifier]) {
+    if (identifier) {
         DLog(@"openFileInEditor. editor=%@", [self preferredEditorIdentifier]);
-        if ([[self preferredEditorIdentifier] isEqualToString:kAtomIdentifier]) {
+        if ([identifier isEqualToString:kAtomIdentifier]) {
             if (lineNumber != nil) {
                 path = [NSString stringWithFormat:@"%@:%@", path, lineNumber];
             }
             [self launchAtomWithPath:path];
-        } else if ([[self preferredEditorIdentifier] isEqualToString:kSublimeText2Identifier] ||
-                   [[self preferredEditorIdentifier] isEqualToString:kSublimeText3Identifier]) {
+        } else if ([identifier isEqualToString:kSublimeText2Identifier] ||
+                   [identifier isEqualToString:kSublimeText3Identifier]) {
             if (lineNumber != nil) {
                 path = [NSString stringWithFormat:@"%@:%@", path, lineNumber];
             }
             NSString *bundleId;
-            if ([[self preferredEditorIdentifier] isEqualToString:kSublimeText3Identifier]) {
+            if ([identifier isEqualToString:kSublimeText3Identifier]) {
                 bundleId = kSublimeText3Identifier;
             } else {
                 bundleId = kSublimeText2Identifier;
@@ -195,7 +194,7 @@ NSString *const kSemanticHistoryWorkingDirectorySubstitutionKey = @"semanticHist
         } else {
             path = [path stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
             NSURL *url = nil;
-            NSString *editorIdentifier = [self preferredEditorIdentifier];
+            NSString *editorIdentifier = identifier;
             if (lineNumber) {
                 url = [NSURL URLWithString:[NSString stringWithFormat:
                                             @"%@://open?url=file://%@&line=%@",
@@ -238,7 +237,7 @@ NSString *const kSemanticHistoryWorkingDirectorySubstitutionKey = @"semanticHist
 
 - (BOOL)openFile:(NSString *)fullPath {
     DLog(@"Open file %@", fullPath);
-    return [[NSWorkspace sharedWorkspace] openFile:fullPath];
+    return [[iTermLaunchServices sharedInstance] openFile:fullPath];
 }
 
 - (BOOL)openURL:(NSURL *)url editorIdentifier:(NSString *)editorIdentifier {

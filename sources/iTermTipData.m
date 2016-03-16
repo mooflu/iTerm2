@@ -23,7 +23,7 @@
                           kTipUrlKey: @"https://iterm2.com/shell_integration.html" },
 
             @"0001": @{ kTipTitleKey: @"Timestamps",
-                         kTipBodyKey: @"“View > Toggle Timestamps” shows the time (and date, if appropriate) when each line was last modified." },
+                         kTipBodyKey: @"“View > Show Timestamps” shows the time (and date, if appropriate) when each line was last modified." },
 
             @"0002": @{ kTipTitleKey: @"Password Manager",
                         kTipBodyKey: @"Did you know iTerm2 has a password manager? Open it with “Window > Password Manager.” You can define a Trigger to open it for you at a password prompt in “Prefs > Profiles > Advanced > Triggers.”" },
@@ -67,7 +67,7 @@
 
     // Big but not new features
             @"0014": @{ kTipTitleKey: @"Semantic History",
-                         kTipBodyKey: @"⌘-click on a file or URL to open it.", },
+                         kTipBodyKey: @"The “Semantic History” feature allows you to ⌘-click on a file or URL to open it.", },
 
             @"0015": @{ kTipTitleKey: @"Tmux Integration",
                         kTipBodyKey: @"If you use tmux, try running “tmux -CC” to get iTerm2‘s tmux integration mode. The tmux windows show up as native iTerm2 windows, and you can use iTerm2‘s keyboard shortcuts. It even works over ssh!",
@@ -110,7 +110,7 @@
                         kTipUrlKey: @"https://iterm2.com/shell_integration.html" },
 
             @"0026": @{ kTipTitleKey: @"Shell Integration: Selection",
-                        kTipBodyKey: @"With Shell Integration installed, you can select the output of the last command with ⌥⌘A.",
+                        kTipBodyKey: @"With Shell Integration installed, you can select the output of the last command with ⇧⌘A.",
                         kTipUrlKey: @"https://iterm2.com/shell_integration.html" },
 
             @"0027": @{ kTipTitleKey: @"Bells",

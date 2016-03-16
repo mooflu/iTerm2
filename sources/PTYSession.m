@@ -11,6 +11,7 @@
 #import "iTermAnnouncementViewController.h"
 #import "iTermApplication.h"
 #import "iTermApplicationDelegate.h"
+#import "iTermAutomaticProfileSwitcher.h"
 #import "iTermColorMap.h"
 #import "iTermCommandHistoryCommandUseMO+Addtions.h"
 #import "iTermController.h"
@@ -73,6 +74,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+
 // The format for a user defaults key that recalls if the user has already been pestered about
 // outdated key mappings for a give profile. The %@ is replaced with the profile's GUID.
 static NSString *const kAskAboutOutdatedKeyMappingKeyFormat = @"AskAboutOutdatedKeyMappingForGuid%@";
@@ -126,6 +128,7 @@ static NSString *const SESSION_ARRANGEMENT_HOSTS = @"Hosts";  // Array of VT100R
 static NSString *const SESSION_ARRANGEMENT_CURSOR_GUIDE = @"Cursor Guide";  // BOOL
 static NSString *const SESSION_ARRANGEMENT_LAST_DIRECTORY = @"Last Directory";  // NSString
 static NSString *const SESSION_ARRANGEMENT_SELECTION = @"Selection";  // Dictionary for iTermSelection.
+static NSString *const SESSION_ARRANGEMENT_APS = @"Automatic Profile Switching";  // Dictionary of APS state.
 
 static NSString *const SESSION_ARRANGEMENT_PROGRAM = @"Program";  // Dictionary. See kProgram constants below.
 static NSString *const SESSION_ARRANGEMENT_ENVIRONMENT = @"Environment";  // Dictionary of environment vars program was run in
@@ -158,7 +161,11 @@ static NSMutableDictionary *gRegisteredSessionContents;
 // Rate limit for checking instant (partial-line) triggers, in seconds.
 static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
 
-@interface PTYSession () <iTermPasteHelperDelegate>
+// Grace period to avoid failing to write anti-idle code when timer runs just before when the code
+// should be sent.
+static const NSTimeInterval kAntiIdleGracePeriod = 0.1;
+
+@interface PTYSession () <iTermAutomaticProfileSwitcherDelegate, iTermPasteHelperDelegate>
 @property(nonatomic, retain) Interval *currentMarkOrNotePosition;
 @property(nonatomic, retain) TerminalFile *download;
 @property(nonatomic, readwrite) NSTimeInterval lastOutput;
@@ -180,6 +187,7 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
 @property(nonatomic, copy) NSString *guid;
 @property(nonatomic, retain) iTermPasteHelper *pasteHelper;
 @property(nonatomic, copy) NSString *lastCommand;
+@property(nonatomic, retain) iTermAutomaticProfileSwitcher *automaticProfileSwitcher;
 @end
 
 @implementation PTYSession {
@@ -219,9 +227,6 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
 
     // Anti-idle timer that sends a character every so often to the host.
     NSTimer *_antiIdleTimer;
-
-    // The code to send in the anti idle timer.
-    char _antiIdleCode;
 
     // The bookmark the session was originally created with so those settings can be restored if
     // needed.
@@ -398,6 +403,7 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
         _commands = [[NSMutableArray alloc] init];
         _directories = [[NSMutableArray alloc] init];
         _hosts = [[NSMutableArray alloc] init];
+        _automaticProfileSwitcher = [[iTermAutomaticProfileSwitcher alloc] initWithDelegate:self];
         // Allocate a guid. If we end up restoring from a session during startup this will be replaced.
         _guid = [[NSString uuid] retain];
         [[NSNotificationCenter defaultCenter] addObserver:self
@@ -483,6 +489,8 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
     [_lastCommand release];
     [_substitutions release];
     [_jobName release];
+    [_automaticProfileSwitcher release];
+
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 
     if (_dvrDecoder) {
@@ -902,6 +910,11 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
     if (arrangement[SESSION_ARRANGEMENT_SELECTION]) {
         [aSession.textview.selection setFromDictionaryValue:arrangement[SESSION_ARRANGEMENT_SELECTION]];
     }
+    if (arrangement[SESSION_ARRANGEMENT_APS]) {
+        aSession.automaticProfileSwitcher =
+            [[iTermAutomaticProfileSwitcher alloc] initWithDelegate:aSession
+                                                         savedState:arrangement[SESSION_ARRANGEMENT_APS]];
+    }
     if (didRestoreContents && attachedToServer) {
         Interval *interval = aSession.screen.lastPromptMark.entry.interval;
         if (interval) {
@@ -1154,7 +1167,7 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
             pwd = NSHomeDirectory();
         }
     }
-    isUTF8 = ([iTermProfilePreferences intForKey:KEY_CHARACTER_ENCODING inProfile:profile] == NSUTF8StringEncoding);
+    isUTF8 = ([iTermProfilePreferences unsignedIntegerForKey:KEY_CHARACTER_ENCODING inProfile:profile] == NSUTF8StringEncoding);
 
     [[[self tab] realParentWindow] setName:theName forSession:self];
 
@@ -1365,6 +1378,7 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
                                              withURL:url
                                             isHotkey:NO
                                              makeKey:NO
+                                         canActivate:NO
                                              command:nil
                                                block:nil];
 }
@@ -1391,7 +1405,7 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
 
 - (void)_maybeWarnAboutShortLivedSessions
 {
-    if ([(iTermApplicationDelegate *)[NSApp delegate] isApplescriptTestApp]) {
+    if (iTermApplication.sharedApplication.delegate.isApplescriptTestApp) {
         // The applescript test driver doesn't care about short-lived sessions.
         return;
     }
@@ -1565,7 +1579,11 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
         [NSObject cancelPreviousPerformRequestsWithTarget:self
                                                  selector:@selector(hardStop)
                                                    object:nil];
-        if (!_shell.hasBrokenPipe) {
+        if (_shell.hasBrokenPipe) {
+            if (self.isRestartable) {
+                [self queueRestartSessionAnnouncement];
+            }
+        } else {
             _exited = NO;
         }
         _textview.dataSource = _screen;
@@ -1839,12 +1857,19 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
 - (void)checkTriggersOnPartialLine:(BOOL)partial
                         stringLine:(iTermStringLine *)stringLine
                                   lineNumber:(long long)startAbsLineNumber {
-    for (Trigger *trigger in _triggers) {
+    // If the trigger causes the session to get released, don't crash.
+    [[self retain] autorelease];
+
+    // If a trigger changes the current profile then _triggers gets released and we should stop
+    // processing triggers. This can happen with automatic profile switching.
+    NSArray<Trigger *> *triggers = [[_triggers retain] autorelease];
+
+    for (Trigger *trigger in triggers) {
         BOOL stop = [trigger tryString:stringLine
                              inSession:self
                            partialLine:partial
                             lineNumber:startAbsLineNumber];
-        if (stop) {
+        if (stop || _exited || (_triggers != triggers)) {
             break;
         }
     }
@@ -1953,32 +1978,45 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
         [self appendBrokenPipeMessage:@"Session Restarted"];
         [self replaceTerminatedShellWithNewInstance];
     } else if ([self autoClose]) {
+        [self appendBrokenPipeMessage:@"Broken Pipe"];
         [[self tab] closeSession:self];
     } else {
         // Offer to restart the session by rerunning its program.
         [self appendBrokenPipeMessage:@"Broken Pipe"];
         if ([self isRestartable]) {
-            iTermAnnouncementViewController *announcement =
-                [iTermAnnouncementViewController announcementWithTitle:@"Session ended (broken pipe). Restart it?"
-                                                                 style:kiTermAnnouncementViewStyleQuestion
-                                                           withActions:@[ @"Restart" ]
-                                                            completion:^(int selection) {
-                                                                switch (selection) {
-                                                                    case -2:  // Dismiss programmatically
-                                                                        break;
-
-                                                                    case -1: // No
-                                                                        break;
-
-                                                                    case 0: // Yes
-                                                                        [self replaceTerminatedShellWithNewInstance];
-                                                                        break;
-                                                                }
-                                                            }];
-            [self queueAnnouncement:announcement identifier:kReopenSessionWarningIdentifier];
+            [self queueRestartSessionAnnouncement];
         }
         [self updateDisplay];
     }
+}
+
+- (void)queueRestartSessionAnnouncement {
+    static NSString *const kSuppressRestartAnnouncement = @"SuppressRestartAnnouncement";
+    if ([[NSUserDefaults standardUserDefaults]boolForKey:kSuppressRestartAnnouncement]) {
+        return;
+    }
+    iTermAnnouncementViewController *announcement =
+        [iTermAnnouncementViewController announcementWithTitle:@"Session ended (broken pipe). Restart it?"
+                                                         style:kiTermAnnouncementViewStyleQuestion
+                                                   withActions:@[ @"Restart", @"Don’t Ask Again" ]
+                                                    completion:^(int selection) {
+                                                        switch (selection) {
+                                                            case -2:  // Dismiss programmatically
+                                                                break;
+
+                                                            case -1: // No
+                                                                break;
+
+                                                            case 0: // Yes
+                                                                [self replaceTerminatedShellWithNewInstance];
+                                                                break;
+
+                                                            case 1: // Don't ask again
+                                                                [[NSUserDefaults standardUserDefaults] setBool:YES
+                                                                                                        forKey:kSuppressRestartAnnouncement];
+                                                        }
+                                                    }];
+    [self queueAnnouncement:announcement identifier:kReopenSessionWarningIdentifier];
 }
 
 - (BOOL)isRestartable {
@@ -2497,6 +2535,7 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
         [self setProfile:updatedProfile];
         return;
     }
+    [self sanityCheck];
 
     // Copy non-overridden fields over.
     NSMutableDictionary *temp = [NSMutableDictionary dictionaryWithDictionary:_profile];
@@ -2535,6 +2574,21 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
     [[ProfileModel sessionsInstance] setBookmark:temp withGuid:temp[KEY_GUID]];
     [self setPreferencesFromAddressBookEntry:temp];
     [self setProfile:temp];
+    [self sanityCheck];
+}
+
+- (void)sanityCheck {
+    // TODO(georgen): This is a workaround to a bug that causes frequent crashes but I haven't figured
+    // out how to reproduce it yet. Sometimes a divorced session's profile's GUID is not in sessionsInstance.
+    // The real fix to this is to get rid of sessionsInstance altogether and make PTYSession hold the
+    // only reference to the divorced profile, but that is too big a project to take on right now.
+    if (_isDivorced) {
+        NSDictionary *sessionsProfile =
+                [[ProfileModel sessionsInstance] bookmarkWithGuid:_profile[KEY_GUID]];
+        if (!sessionsProfile && _profile) {
+            [[ProfileModel sessionsInstance] addBookmark:_profile];
+        }
+    }
 }
 
 - (void)sessionProfileDidChange
@@ -2544,6 +2598,8 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
     }
     NSDictionary *updatedProfile =
         [[ProfileModel sessionsInstance] bookmarkWithGuid:_profile[KEY_GUID]];
+    [self sanityCheck];
+
     NSMutableSet *keys = [NSMutableSet setWithArray:[updatedProfile allKeys]];
     [keys addObjectsFromArray:[_profile allKeys]];
     for (NSString *aKey in keys) {
@@ -2564,10 +2620,12 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
     [self setProfile:updatedProfile];
     [[NSNotificationCenter defaultCenter] postNotificationName:kSessionProfileDidChange
                                                         object:_profile[KEY_GUID]];
+    [self sanityCheck];
 }
 
 - (BOOL)reloadProfile
 {
+    [self sanityCheck];
     DLog(@"Reload profile for %@", self);
     BOOL didChange = NO;
     NSDictionary *sharedProfile = [[ProfileModel sharedInstance] bookmarkWithGuid:_originalProfile[KEY_GUID]];
@@ -2589,6 +2647,7 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
     }
 
     _textview.badgeLabel = [self badgeLabel];
+    [self sanityCheck];
     return didChange;
 }
 
@@ -2664,7 +2723,7 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
     // bold 
     [self setUseBoldFont:[iTermProfilePreferences boolForKey:KEY_USE_BOLD_FONT
                                                    inProfile:aDict]];
-    self.thinStrokes = [iTermProfilePreferences boolForKey:KEY_THIN_STROKES inProfile:aDict];
+    self.thinStrokes = [iTermProfilePreferences intForKey:KEY_THIN_STROKES inProfile:aDict];
 
     [_textview setUseBrightBold:[iTermProfilePreferences boolForKey:KEY_USE_BRIGHT_BOLD
                                                           inProfile:aDict]];
@@ -2703,13 +2762,11 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
                    nonAscii:[iTermProfilePreferences boolForKey:KEY_NONASCII_ANTI_ALIASED
                                                       inProfile:aDict]];
     
-    // Unfortunately, this preference has been saved as a 32-bit int for a while, although it should
-    // be an unsigned 64 bit. Luckily, 32 bits happens to be enough so far, since enabling 64-bit
-    // storage is in the profile prefs system is somewhat involved. For now, hack off the sign
-    // extension.
-    [self setEncodingFromSInt32:[iTermProfilePreferences intForKey:KEY_CHARACTER_ENCODING inProfile:aDict]];
+    [self setEncoding:[iTermProfilePreferences unsignedIntegerForKey:KEY_CHARACTER_ENCODING inProfile:aDict]];
     [self setTermVariable:[iTermProfilePreferences stringForKey:KEY_TERMINAL_TYPE inProfile:aDict]];
+    [_terminal setAnswerBackString:[iTermProfilePreferences stringForKey:KEY_ANSWERBACK_STRING inProfile:aDict]];
     [self setAntiIdleCode:[iTermProfilePreferences intForKey:KEY_IDLE_CODE inProfile:aDict]];
+    [self setAntiIdlePeriod:[iTermProfilePreferences doubleForKey:KEY_IDLE_PERIOD inProfile:aDict]];
     [self setAntiIdle:[iTermProfilePreferences boolForKey:KEY_SEND_CODE_WHEN_IDLE inProfile:aDict]];
     [self setAutoClose:[iTermProfilePreferences boolForKey:KEY_CLOSE_SESSIONS_ON_END inProfile:aDict]];
     _screen.useHFSPlusMapping = [iTermProfilePreferences boolForKey:KEY_USE_HFS_PLUS_MAPPING
@@ -2743,7 +2800,10 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
 }
 
 - (NSString *)badgeLabel {
-    return [_badgeFormat stringByReplacingVariableReferencesWithVariables:_variables];
+    NSString *p = [_badgeFormat stringByReplacingVariableReferencesWithVariables:_variables];
+    p = [p stringByReplacingEscapedChar:'n' withString:@"\n"];
+    p = [p stringByReplacingEscapedHexValuesWithChars];
+    return p;
 }
 
 - (BOOL)isAtShellPrompt {
@@ -2993,13 +3053,6 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
     return [_terminal encoding];
 }
 
-// See note at call site about why this exists.
-- (void)setEncodingFromSInt32:(int)intEncoding {
-    NSStringEncoding encoding = intEncoding;
-    encoding &= 0xffffffff;
-    [self setEncoding:encoding];
-}
-
 - (void)setEncoding:(NSStringEncoding)encoding {
     [_terminal setEncoding:encoding];
 }
@@ -3070,29 +3123,23 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
     [_textview setBlend:blendVal];
 }
 
-- (BOOL)antiIdle
-{
+- (BOOL)antiIdle {
     return _antiIdleTimer ? YES : NO;
 }
 
-- (void)setAntiIdle:(BOOL)set
-{
-    if (set == [self antiIdle]) {
-        return;
-    }
-
+- (void)setAntiIdle:(BOOL)set {
+    [_antiIdleTimer invalidate];
+    [_antiIdleTimer release];
+    _antiIdleTimer = nil;
+    
+    _antiIdlePeriod = MAX(_antiIdlePeriod, kMinimumAntiIdlePeriod);
+    
     if (set) {
-        NSTimeInterval period = MIN(60, [iTermAdvancedSettingsModel antiIdleTimerPeriod]);
-
-        _antiIdleTimer = [[NSTimer scheduledTimerWithTimeInterval:period
+        _antiIdleTimer = [[NSTimer scheduledTimerWithTimeInterval:_antiIdlePeriod
                                                            target:self
                                                          selector:@selector(doAntiIdle)
                                                          userInfo:nil
-                repeats:YES] retain];
-    } else {
-        [_antiIdleTimer invalidate];
-        [_antiIdleTimer release];
-        _antiIdleTimer = nil;
+                                                          repeats:YES] retain];
     }
 }
 
@@ -3106,11 +3153,11 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
     [_textview setUseBoldFont:boldFlag];
 }
 
-- (BOOL)thinStrokes {
+- (iTermThinStrokesSetting)thinStrokes {
     return _textview.thinStrokes;
 }
 
-- (void)setThinStrokes:(BOOL)thinStrokes {
+- (void)setThinStrokes:(iTermThinStrokesSetting)thinStrokes {
     _textview.thinStrokes = thinStrokes;
 }
 
@@ -3283,6 +3330,7 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
         }
         result[SESSION_ARRANGEMENT_SELECTION] =
             [self.textview.selection dictionaryValueWithYOffset:-numberOfLinesDropped];
+        result[SESSION_ARRANGEMENT_APS] = [_automaticProfileSwitcher savedState];
     }
     result[SESSION_ARRANGEMENT_GUID] = _guid;
     if (_liveSession && includeContents && !_dvr) {
@@ -3375,7 +3423,6 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
     }
 
     static const NSTimeInterval kUpdateTitlePeriod = 0.7;
-    const NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
     if ([[self tab] activeSession] == self) {
         // Update window info for the active tab.
         NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
@@ -3477,7 +3524,7 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
     _timeOfLastScheduling = now;
     _lastTimeout = timeout;
 
-    static const NSTimeInterval kMinimumDelay = 1 / 60.0;
+    static const NSTimeInterval kMinimumDelay = 1 / 30.0;
     DLog(@"  scheduling timer to run in %f sec", MAX(kMinimumDelay, timeout - timeSinceLastUpdate));
     
 #if 0
@@ -3503,7 +3550,8 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
 
 - (void)doAntiIdle {
     NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
-    if (now >= _lastInput + 60) {
+
+    if (now >= _lastInput + _antiIdlePeriod - kAntiIdleGracePeriod) {
         [_shell writeTask:[NSData dataWithBytes:&_antiIdleCode length:1]];
         _lastInput = now;
     }
@@ -3613,6 +3661,7 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
                                      toName:profile[KEY_NAME]];
         _tmuxTitleOutOfSync = NO;
     }
+    [self sanityCheck];
 }
 
 - (void)synchronizeTmuxFonts:(NSNotification *)notification
@@ -3694,6 +3743,7 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
 
 - (void)setSessionSpecificProfileValues:(NSDictionary *)newValues
 {
+    [self sanityCheck];
     if (!_isDivorced) {
         [self divorceAddressBookEntryFromPreferences];
     }
@@ -3753,6 +3803,7 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
     [_overriddenFields removeAllObjects];
     [_overriddenFields addObjectsFromArray:@[ KEY_GUID, KEY_ORIGINAL_GUID] ];
     [self setProfile:[[ProfileModel sessionsInstance] bookmarkWithGuid:guid]];
+    [self sanityCheck];
     return guid;
 }
 
@@ -4452,6 +4503,7 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
 }
 
 - (BOOL)textViewShouldAcceptKeyDownEvent:(NSEvent *)event {
+    _lastInput = [NSDate timeIntervalSinceReferenceDate];
     if (_view.currentAnnouncement.dismissOnKeyDown) {
         [_view.currentAnnouncement dismiss];
         return NO;
@@ -4485,7 +4537,6 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
     unicode = [keystr length] > 0 ? [keystr characterAtIndex:0] : 0;
     unmodunicode = [unmodkeystr length] > 0 ? [unmodkeystr characterAtIndex:0] : 0;
     DLog(@"PTYSession keyDown modflag=%d keystr=%@ unmodkeystr=%@ unicode=%d unmodunicode=%d", (int)modflag, keystr, unmodkeystr, (int)unicode, (int)unmodunicode);
-    _lastInput = [NSDate timeIntervalSinceReferenceDate];
     [self resumeOutputIfNeeded];
     if ([self textViewIsZoomedIn] && unicode == 27) {
         // Escape exits zoom (pops out one level, since you can zoom repeatedly)
@@ -4606,13 +4657,13 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
                 [[[self tab] parentWindow] nextTab:nil];
                 break;
             case KEY_ACTION_NEXT_WINDOW:
-                [[iTermController sharedInstance] nextTerminal:nil];
+                [[iTermController sharedInstance] nextTerminal];
                 break;
             case KEY_ACTION_PREVIOUS_SESSION:
                 [[[self tab] parentWindow] previousTab:nil];
                 break;
             case KEY_ACTION_PREVIOUS_WINDOW:
-                [[iTermController sharedInstance] previousTerminal:nil];
+                [[iTermController sharedInstance] previousTerminal];
                 break;
             case KEY_ACTION_SCROLL_END:
                 [_textview scrollEnd];
@@ -4808,6 +4859,22 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
                                               by:[keyBindingText integerValue]];
                 break;
 
+            case KEY_ACTION_DECREASE_HEIGHT:
+                [[[iTermController sharedInstance] currentTerminal] decreaseHeight:nil];
+                break;
+
+            case KEY_ACTION_INCREASE_HEIGHT:
+                [[[iTermController sharedInstance] currentTerminal] increaseHeight:nil];
+                break;
+
+            case KEY_ACTION_DECREASE_WIDTH:
+                [[[iTermController sharedInstance] currentTerminal] decreaseWidth:nil];
+                break;
+
+            case KEY_ACTION_INCREASE_WIDTH:
+                [[[iTermController sharedInstance] currentTerminal] increaseWidth:nil];
+                break;
+
             default:
                 NSLog(@"Unknown key action %d", keyBindingAction);
                 break;
@@ -4933,9 +5000,33 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
                 DLog(@"PTYSession keyDown enter key");
                 keystr = @"\015";  // Enter key -> 0x0d
             }
+            
+            // In issue 4039 we see that in some cases the numeric keypad mask isn't set properly.
+            if (keycode == kVK_ANSI_KeypadDecimal ||
+                keycode == kVK_ANSI_KeypadMultiply ||
+                keycode == kVK_ANSI_KeypadPlus ||
+                keycode == kVK_ANSI_KeypadClear ||
+                keycode == kVK_ANSI_KeypadDivide ||
+                keycode == kVK_ANSI_KeypadEnter ||
+                keycode == kVK_ANSI_KeypadMinus ||
+                keycode == kVK_ANSI_KeypadEquals ||
+                keycode == kVK_ANSI_Keypad0 ||
+                keycode == kVK_ANSI_Keypad1 ||
+                keycode == kVK_ANSI_Keypad2 ||
+                keycode == kVK_ANSI_Keypad3 ||
+                keycode == kVK_ANSI_Keypad4 ||
+                keycode == kVK_ANSI_Keypad5 ||
+                keycode == kVK_ANSI_Keypad6 ||
+                keycode == kVK_ANSI_Keypad7 ||
+                keycode == kVK_ANSI_Keypad8 ||
+                keycode == kVK_ANSI_Keypad9) {
+                DLog(@"Key code 0x%x forced to have numeric keypad mask set", (int)keycode);
+                modflag |= NSNumericPadKeyMask;
+            }
+
             // Check if we are in keypad mode
             if (modflag & NSNumericPadKeyMask) {
-                DLog(@"PTYSession keyDown numeric keyoad");
+                DLog(@"PTYSession keyDown numeric keypad");
                 data = [_terminal.output keypadData:unicode keystr:keystr];
             }
 
@@ -5310,14 +5401,12 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
     [[[self tab] realParentWindow] previousTab:nil];
 }
 
-- (void)textViewSelectNextWindow
-{
-    [[iTermController sharedInstance] nextTerminal:nil];
+- (void)textViewSelectNextWindow {
+    [[iTermController sharedInstance] nextTerminal];
 }
 
-- (void)textViewSelectPreviousWindow
-{
-    [[iTermController sharedInstance] previousTerminal:nil];
+- (void)textViewSelectPreviousWindow {
+    [[iTermController sharedInstance] previousTerminal];
 }
 
 - (void)textViewSelectNextPane
@@ -5616,6 +5705,41 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
     return [iTermProfilePreferences boolForKey:KEY_SHOW_MARK_INDICATORS inProfile:_profile];
 }
 
+- (void)textViewThinksUserIsTryingToSendArrowKeysWithScrollWheel:(BOOL)isTrying {
+    static NSString *const kIdentifier = @"AskAboutAlternateMouseScroll";
+    if (!isTrying) {
+        [self dismissAnnouncementWithIdentifier:kIdentifier];
+        return;
+    }
+    static NSString *const kNeverAskAboutAltMouseScroll = @"NoSyncNeverAskAboutSettingAlternateMouseScroll";
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:kNeverAskAboutAltMouseScroll]) {
+        return;
+    }
+    iTermAnnouncementViewController *announcement =
+        [iTermAnnouncementViewController announcementWithTitle:@"Do you want the scroll wheel to move the cursor in interactive programs like this?"
+                                                         style:kiTermAnnouncementViewStyleQuestion
+                                                   withActions:@[ @"Yes", @"Don‘t Ask Again" ]
+                                                    completion:^(int selection) {
+                                                        switch (selection) {
+                                                            case -2:  // Dismiss programmatically
+                                                                break;
+                                                                
+                                                            case -1: // No
+                                                                break;
+                                                                
+                                                            case 0: // Yes
+                                                                [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"AlternateMouseScroll"];
+                                                                break;
+                                                                
+                                                            case 1: { // Never
+                                                                [[NSUserDefaults standardUserDefaults] setBool:YES forKey:kNeverAskAboutAltMouseScroll];
+                                                                break;
+                                                            }
+                                                        }
+                                                    }];
+    [self queueAnnouncement:announcement identifier:kIdentifier];
+}
+
 - (void)sendEscapeSequence:(NSString *)text
 {
     if (_exited) {
@@ -5867,6 +5991,10 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
     return self.guid;
 }
 
+- (void)screenScheduleRedrawSoon {
+    [self scheduleUpdateIn:kFastTimerIntervalSec];
+}
+
 - (void)screenNeedsRedraw {
     [self refreshAndStartTimerIfNeeded];
     [_textview updateNoteViewFrames];
@@ -5895,7 +6023,8 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
 - (void)screenDidReset {
     [self loadInitialColorTable];
     _cursorGuideSettingHasChanged = NO;
-    _textview.highlightCursorLine = NO;
+    _textview.highlightCursorLine = [iTermProfilePreferences boolForKey:KEY_USE_CURSOR_GUIDE
+                                                              inProfile:_profile];
     [_textview setNeedsDisplay:YES];
     _screen.trackCursorLineMovement = NO;
 }
@@ -6189,7 +6318,7 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
                                                 ofClass:markClass] retain];
     self.currentMarkOrNotePosition = _lastMark.entry.interval;
     if (self.alertOnNextMark) {
-        NSString *action = [(iTermApplicationDelegate *)[[iTermApplication sharedApplication] delegate] markAlertAction];
+        NSString *action = iTermApplication.sharedApplication.delegate.markAlertAction;
         if ([action isEqualToString:kMarkAlertActionPostNotification]) {
             [[iTermGrowlDelegate sharedInstance] growlNotify:@"Mark Set"
                                              withDescription:[NSString stringWithFormat:@"Session %@ #%d had a mark set.",
@@ -6428,10 +6557,14 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
     [self queueAnnouncement:announcement identifier:kIdentifier];
 }
 
-- (void)screenSetBadgeFormat:(NSString *)theFormat {
-    theFormat = [theFormat stringByBase64DecodingStringWithEncoding:self.encoding];
-    [self setSessionSpecificProfileValues:@{ KEY_BADGE_FORMAT: theFormat }];
-    _textview.badgeLabel = [self badgeLabel];
+- (void)screenSetBadgeFormat:(NSString *)base64Format {
+    NSString *theFormat = [base64Format stringByBase64DecodingStringWithEncoding:self.encoding];
+    if (theFormat) {
+        [self setSessionSpecificProfileValues:@{ KEY_BADGE_FORMAT: theFormat }];
+        _textview.badgeLabel = [self badgeLabel];
+    } else {
+        ELog(@"Badge is not properly base64 encoded: %@", base64Format);
+    }
 }
 
 - (void)screenSetUserVar:(NSString *)kvpString {
@@ -6591,37 +6724,7 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
 - (void)tryAutoProfileSwitchWithHostname:(NSString *)hostname
                                 username:(NSString *)username
                                     path:(NSString *)path {
-    // Construct a map from host binding to profile. This could be expensive with a lot of profiles
-    // but it should be fairly rare for this code to run.
-    NSMutableDictionary *stringToProfile = [NSMutableDictionary dictionary];
-    for (Profile *profile in [[ProfileModel sharedInstance] bookmarks]) {
-        NSArray *boundHosts = profile[KEY_BOUND_HOSTS];
-        for (NSString *boundHost in boundHosts) {
-            stringToProfile[boundHost] = profile;
-        }
-    }
-
-    // Find the best-matching rule.
-    int bestScore = 0;
-    int longestHost = 0;
-    Profile *bestProfile = nil;
-
-    for (NSString *ruleString in stringToProfile) {
-        iTermRule *rule = [iTermRule ruleWithString:ruleString];
-        int score = [rule scoreForHostname:hostname username:username path:path];
-        if ((score > bestScore) || (score > 0 && score == bestScore && [rule.hostname length] > longestHost)) {
-            bestScore = score;
-            longestHost = [rule.hostname length];
-            bestProfile = stringToProfile[ruleString];
-        }
-    }
-    if (bestProfile) {
-        [self setProfile:bestProfile preservingName:NO];
-    }
-
-    // screenCurrentDirectoryDidChangeTo depends on us calling setBadgeLabel.
-    // If you remove it here, add one there.
-    [_textview setBadgeLabel:[self badgeLabel]];
+    [_automaticProfileSwitcher setHostname:hostname username:username path:path];
 }
 
 - (void)screenCurrentDirectoryDidChangeTo:(NSString *)newPath {
@@ -6636,6 +6739,7 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
     [self tryAutoProfileSwitchWithHostname:remoteHost.hostname
                                   username:remoteHost.username
                                       path:newPath];
+    [_textview setBadgeLabel:[self badgeLabel]];
 }
 
 - (BOOL)screenShouldSendReport {
@@ -6763,7 +6867,7 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
     }
 }
 
-- (BOOL)screenShouldIgnoreBell {
+- (BOOL)screenShouldIgnoreBellWhichIsAudible:(BOOL)audible visible:(BOOL)visible {
     NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
     if (now < _ignoreBellUntil) {
         return YES;
@@ -6809,44 +6913,77 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
         !existingAnnouncement &&
         (now - _annoyingBellOfferDeclinedAt > kTimeToWaitAfterDecline) &&
         ![[NSUserDefaults standardUserDefaults] boolForKey:kSuppressAnnoyingBellOffer]) {
-        iTermAnnouncementViewController *announcement =
-            [iTermAnnouncementViewController announcementWithTitle:@"The bell is ringing a lot. Silence it?"
-                                                             style:kiTermAnnouncementViewStyleQuestion
-                                                       withActions:@[ @"Silence Bell Temporarily",
-                                                                      @"Suppress All Output",
-                                                                      @"Don't Offer Again",
-                                                                      @"Silence Automatically" ]
-                                                        completion:^(int selection) {
-                    // Release the moving average so the count will restart after the announcement goes away.
-                    [_bellRate release];
-                    _bellRate = nil;
-                    switch (selection) {
-                        case -2:  // Dismiss programmatically
-                            break;
+        iTermAnnouncementViewController *announcement = nil;
+        if (audible || visible) {
+            announcement =
+                [iTermAnnouncementViewController announcementWithTitle:@"The bell is ringing a lot. Silence it?"
+                                                                 style:kiTermAnnouncementViewStyleQuestion
+                                                           withActions:@[ @"Silence Bell Temporarily",
+                                                                          @"Suppress All Output",
+                                                                          @"Don't Offer Again",
+                                                                          @"Silence Automatically" ]
+                                                            completion:^(int selection) {
+                        // Release the moving average so the count will restart after the announcement goes away.
+                        [_bellRate release];
+                        _bellRate = nil;
+                        switch (selection) {
+                            case -2:  // Dismiss programmatically
+                                break;
 
-                        case -1: // No
-                            _annoyingBellOfferDeclinedAt = [NSDate timeIntervalSinceReferenceDate];
-                            break;
+                            case -1: // No
+                                _annoyingBellOfferDeclinedAt = [NSDate timeIntervalSinceReferenceDate];
+                                break;
 
-                        case 0: // Suppress bell temporarily
-                            _ignoreBellUntil = now + 60;
-                            break;
+                            case 0: // Suppress bell temporarily
+                                _ignoreBellUntil = now + 60;
+                                break;
 
-                        case 1: // Suppress all output
-                            _suppressAllOutput = YES;
-                            break;
+                            case 1: // Suppress all output
+                                _suppressAllOutput = YES;
+                                break;
 
-                        case 2: // Never offer again
-                            [[NSUserDefaults standardUserDefaults] setBool:YES
-                                                                    forKey:kSuppressAnnoyingBellOffer];
-                            break;
+                            case 2: // Never offer again
+                                [[NSUserDefaults standardUserDefaults] setBool:YES
+                                                                        forKey:kSuppressAnnoyingBellOffer];
+                                break;
 
-                        case 3:  // Silence automatically
-                            [[NSUserDefaults standardUserDefaults] setBool:YES
-                                                                    forKey:kSilenceAnnoyingBellAutomatically];
-                            break;
-                    }
-                }];
+                            case 3:  // Silence automatically
+                                [[NSUserDefaults standardUserDefaults] setBool:YES
+                                                                        forKey:kSilenceAnnoyingBellAutomatically];
+                                break;
+                        }
+                    }];
+        } else {
+            // Neither audible nor visible.
+            announcement =
+                [iTermAnnouncementViewController announcementWithTitle:@"The bell is ringing a lot. Want to suppress all output until things calm down?"
+                                                                 style:kiTermAnnouncementViewStyleQuestion
+                                                           withActions:@[ @"Suppress All Output",
+                                                                          @"Don't Offer Again" ]
+                                                            completion:^(int selection) {
+                        // Release the moving average so the count will restart after the announcement goes away.
+                        [_bellRate release];
+                        _bellRate = nil;
+                        switch (selection) {
+                            case -2:  // Dismiss programmatically
+                                break;
+
+                            case -1: // No
+                                _annoyingBellOfferDeclinedAt = [NSDate timeIntervalSinceReferenceDate];
+                                break;
+
+                            case 0: // Suppress all output
+                                _suppressAllOutput = YES;
+                                break;
+
+                            case 2: // Never offer again
+                                [[NSUserDefaults standardUserDefaults] setBool:YES
+                                                                        forKey:kSuppressAnnoyingBellOffer];
+                                break;
+                        }
+                    }];
+        }
+
         // Set the auto-dismiss timeout.
         announcement.timeout = 10;
         [self queueAnnouncement:announcement identifier:identifier];
@@ -6859,6 +6996,7 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
 }
 
 - (void)setLastDirectory:(NSString *)lastDirectory {
+    DLog(@"Set last directory to %@", lastDirectory);
     if (lastDirectory) {
         [_directories addObject:lastDirectory];
     }
@@ -7102,6 +7240,40 @@ static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
 
 - (BOOL)pasteHelperCanWaitForPrompt {
     return _shellIntegrationEverUsed;
+}
+
+#pragma mark - iTermAutomaticProfileSwitcherDelegate
+
+- (iTermSavedProfile *)automaticProfileSwitcherCurrentSavedProfile {
+    iTermSavedProfile *savedProfile = [[[iTermSavedProfile alloc] init] autorelease];
+    savedProfile.profile = _profile;
+    savedProfile.originalProfile = _originalProfile;
+    savedProfile.isDivorced = _isDivorced;
+    savedProfile.overriddenFields = _overriddenFields;
+    return savedProfile;
+}
+
+- (NSDictionary *)automaticProfileSwitcherCurrentProfile {
+    return _originalProfile;
+}
+
+- (void)automaticProfileSwitcherLoadProfile:(iTermSavedProfile *)savedProfile {
+    [self setProfile:savedProfile.originalProfile preservingName:NO];
+    if (savedProfile.isDivorced) {
+        NSMutableDictionary *overrides = [NSMutableDictionary dictionary];
+        for (NSString *key in savedProfile.overriddenFields) {
+            if ([key isEqualToString:KEY_GUID] || [key isEqualToString:KEY_ORIGINAL_GUID]) {
+                continue;
+            }
+            overrides[key] = savedProfile.profile[key];
+        }
+        [self setSessionSpecificProfileValues:overrides];
+    }
+    [self sanityCheck];
+}
+
+- (NSArray<NSDictionary *> *)automaticProfileSwitcherAllProfiles {
+    return [[ProfileModel sharedInstance] bookmarks];
 }
 
 @end

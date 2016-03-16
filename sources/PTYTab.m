@@ -119,12 +119,6 @@ static const NSUInteger kPTYTabDeadState = (1 << 3);
 @synthesize broadcasting = broadcasting_;
 @synthesize isMaximized = isMaximized_;
 
-// tab icons
-static NSImage *warningImage;  // bell
-static NSImage *gNewOutputImage;
-static NSImage *gIdleImage;
-static NSImage *gDeadImage;
-
 // Constants for saved window arrangement keys.
 static NSString* TAB_ARRANGEMENT_ROOT = @"Root";
 static NSString* TAB_ARRANGEMENT_VIEW_TYPE = @"View Type";
@@ -147,14 +141,38 @@ static NSString* TAB_ARRANGEMENT_COLOR = @"Tab color";  // DEPRECATED - Each PTY
 
 static const BOOL USE_THIN_SPLITTERS = YES;
 
-+ (void)initialize {
-    warningImage = [[NSImage imageNamed:@"important"] retain];
-    gNewOutputImage = [[NSImage imageNamed:@"NewOutput"] retain];
++ (NSImage *)bellImage {
+    return [NSImage imageNamed:@"important"];
+}
+
++ (NSImage *)newOutputImage {
+    iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
+    switch (preferredStyle) {
+        case TAB_STYLE_LIGHT:
+            return [NSImage imageNamed:@"NewOutput"];
+        case TAB_STYLE_DARK:
+            return [NSImage imageNamed:@"NewOutputForDarkTheme"];
+    }
+
+    return [NSImage imageNamed:@"NewOutput"];
+}
+
++ (NSImage *)idleImage {
     // There was a separate idle graphic, but I prefer NewOutput. The distinction is already drawn
     // because a spinner is present only while new output is being received. It's still in the git
     // repo, named "Idle.png".
-    gIdleImage = [[NSImage imageNamed:@"NewOutput"] retain];
-    gDeadImage = [[NSImage imageNamed:@"dead"] retain];
+    return [self newOutputImage];
+}
+
++ (NSImage *)deadImage {
+    iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
+    switch (preferredStyle) {
+        case TAB_STYLE_LIGHT:
+            return [NSImage imageNamed:@"dead"];
+        case TAB_STYLE_DARK:
+            return [NSImage imageNamed:@"DeadForDarkTheme"];
+    }
+    return [NSImage imageNamed:@"dead"];
 }
 
 + (void)_recursiveRegisterSessionsInArrangement:(NSDictionary *)arrangement {
@@ -368,18 +386,22 @@ static const BOOL USE_THIN_SPLITTERS = YES;
 
 - (void)updateIcon {
     if (_state & kPTYTabDeadState) {
-        [self setIcon:gDeadImage];
+        [self setIcon:[PTYTab deadImage]];
     } else if (_state & kPTYTabBellState) {
-        [self setIcon:warningImage];
+        [self setIcon:[PTYTab bellImage]];
     } else if (![iTermPreferences boolForKey:kPreferenceKeyHideTabActivityIndicator] &&
                (_state & (kPTYTabNewOutputState))) {
-        [self setIcon:gNewOutputImage];
+        [self setIcon:[PTYTab newOutputImage]];
     } else if (![iTermPreferences boolForKey:kPreferenceKeyHideTabActivityIndicator] &&
                (_state & kPTYTabIdleState)) {
-        [self setIcon:gIdleImage];
+        [self setIcon:[PTYTab idleImage]];
     } else {
         [self setIcon:nil];
     }
+}
+
+- (void)loadTitleFromSession {
+    tabViewItem_.label = self.activeSession.name;
 }
 
 - (void)nameOfSession:(PTYSession*)session didChangeTo:(NSString*)newName {
@@ -694,8 +716,7 @@ static const BOOL USE_THIN_SPLITTERS = YES;
     [_delegate tab:self didChangeIcon:anIcon];
 }
 
-- (BOOL)realIsProcessing
-{
+- (BOOL)realIsProcessing {
     return isProcessing_;
 }
 
@@ -3623,12 +3644,13 @@ static NSString* FormatRect(NSRect r) {
     }
     // Dragging looks a lot better if we turn on resizing subviews temporarily.
     for (SessionView *sv in [self sessionViews]) {
-            [sv setAutoresizesSubviews:YES];
+        [sv setAutoresizesSubviews:YES];
     }
 }
 
-- (void)splitView:(PTYSplitView *)splitView draggingDidEndOfSplit:(int)splitterIndex pixels:(NSSize)pxMoved
-{
+- (void)splitView:(PTYSplitView *)splitView
+  draggingDidEndOfSplit:(int)splitterIndex
+           pixels:(NSSize)pxMoved {
     if (![self isTmuxTab]) {
         // Don't care for non-tmux tabs.
         return;
@@ -4304,8 +4326,9 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize* dest, CGFloat value)
     [self _splitViewDidResizeSubviews:splitView];
 }
 
-- (void)_splitViewDidResizeSubviews:(NSSplitView*)splitView
-{
+// This is the implementation of splitViewDidResizeSubviews. The delegate method isn't called when
+// views are added or adjusted, so we often have to call this ourselves.
+- (void)_splitViewDidResizeSubviews:(NSSplitView*)splitView {
     PtyLog(@"_splitViewDidResizeSubviews running");
     for (NSView* subview in [splitView subviews]) {
         if ([subview isKindOfClass:[SessionView class]]) {
@@ -4378,7 +4401,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize* dest, CGFloat value)
 - (void)setLabelAttributesForDeadSession {
     [self setState:kPTYTabDeadState reset:0];
 
-    if ([self isProcessing]) {
+    if (isProcessing_) {
         [self setIsProcessing:NO];
     }
 }
@@ -4480,7 +4503,6 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize* dest, CGFloat value)
         }
         if (![aSession shouldPostGrowlNotification]) {
             [aSession setHavePostedNewOutputNotification:NO];
-            [aSession setNewOutput:NO];
             shouldResetLabel = YES;
         }
     }
