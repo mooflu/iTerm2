@@ -1,4 +1,3 @@
-// -*- mode:objc -*-
 /*
  **  ScreenChar.h
  **
@@ -381,7 +380,8 @@ void StringToScreenChars(NSString *s,
                          BOOL ambiguousIsDoubleWidth,
                          int *cursorIndex,
                          BOOL *foundDwc,
-                         BOOL useHFSPlusMapping);
+                         BOOL useHFSPlusMapping,
+                         NSInteger unicodeVersion);
 
 // Copy attributes from fg and bg, and zero out other fields. Text attributes like bold, italic, etc.
 // come from fg.
@@ -397,8 +397,13 @@ BOOL StringContainsCombiningMark(NSString *s);
 // Allocates a new image code and sets in the return value. The image will be
 // displayed in the terminal with width x height cells. If preserveAspectRatio
 // is set then background-color bars will be added on the edges so the image is
-// not distorted.
-screen_char_t ImageCharForNewImage(NSString *name, int width, int height, BOOL preserveAspectRatio);
+// not distorted. Insets should be specified as a fraction of cell size (all inset values should be
+// in [0, 1] and will be multiplied by cell width and height before rendering.).
+screen_char_t ImageCharForNewImage(NSString *name,
+                                   int width,
+                                   int height,
+                                   BOOL preserveAspectRatio,
+                                   NSEdgeInsets insets);
 
 // Sets the row and column number in an image cell. Goes from 0 to width/height
 // as specified in the preceding call to ImageCharForNewImage.

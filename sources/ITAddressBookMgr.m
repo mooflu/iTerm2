@@ -29,7 +29,10 @@
 
 #import "DebugLogging.h"
 #import "iTermDynamicProfileManager.h"
+#import "iTermHotKeyController.h"
 #import "iTermKeyBindingMgr.h"
+#import "iTermHotKeyMigrationHelper.h"
+#import "iTermHotKeyProfileBindingController.h"
 #import "iTermPreferences.h"
 #import "iTermProfilePreferences.h"
 #import "PreferencePanel.h"
@@ -39,7 +42,10 @@
 #import "NSFont+iTerm.h"
 #include <arpa/inet.h>
 
+NSString *const iTermUnicodeVersionDidChangeNotification = @"iTermUnicodeVersionDidChangeNotification";
+
 const NSTimeInterval kMinimumAntiIdlePeriod = 1.0;
+NSInteger iTermProfileJoinsAllSpaces = -1;
 
 @implementation ITAddressBookMgr {
     NSNetServiceBrowser *sshBonjourBrowser;
@@ -133,6 +139,9 @@ const NSTimeInterval kMinimumAntiIdlePeriod = 1.0;
             // One of the dynamic profiles has the default guid.
             [[ProfileModel sharedInstance] setDefaultByGuid:originalDefaultGuid];
         }
+        
+        [[iTermHotKeyMigrationHelper sharedInstance] migrateSingleHotkeyToMulti];
+        [[iTermHotKeyProfileBindingController sharedInstance] refresh];
     }
 
     return self;
@@ -204,9 +213,6 @@ const NSTimeInterval kMinimumAntiIdlePeriod = 1.0;
     return [origColor dictionaryValue];
 }
 
-// This method always returns a color in the calibrated color space. If the
-// color space in the plist is not calibrated, it is converted (which preserves
-// the actual color values).
 + (NSColor *)decodeColor:(NSDictionary*)plist {
     return [plist colorValue];
 }
@@ -552,8 +558,9 @@ const NSTimeInterval kMinimumAntiIdlePeriod = 1.0;
 }
 
 + (NSString *)shellLauncherCommand {
-    return [NSString stringWithFormat:@"/usr/bin/login -fpl %@ %@ --launch_shell",
-            NSUserName(),
+    return [NSString stringWithFormat:@"/usr/bin/login -f%@pl %@ %@ --launch_shell",
+            [self hushlogin] ? @"q" : @"",
+            [NSUserName() stringWithEscapedShellCharacters],
             [[[NSBundle mainBundle] executablePath] stringWithEscapedShellCharacters]];
 }
 
@@ -591,8 +598,14 @@ const NSTimeInterval kMinimumAntiIdlePeriod = 1.0;
     }
 }
 
+// See issue 4425 for why we do this.
++ (BOOL)hushlogin {
+    NSString *path = [NSHomeDirectory() stringByAppendingPathComponent:@".hushlogin"];
+    return [[NSFileManager defaultManager] fileExistsAtPath:path];
+}
+
 + (NSString *)standardLoginCommand {
-    return [NSString stringWithFormat:@"login -fp \"%@\"", NSUserName()];
+    return [NSString stringWithFormat:@"login -f%@p \"%@\"", [self hushlogin] ? @"q" : @"", NSUserName()];
 }
 
 + (NSString*)bookmarkCommand:(Profile*)bookmark
@@ -669,12 +682,12 @@ const NSTimeInterval kMinimumAntiIdlePeriod = 1.0;
     return YES;
 }
 
-+ (void)removeProfile:(NSDictionary *)profile fromModel:(ProfileModel *)model {
++ (BOOL)removeProfile:(NSDictionary *)profile fromModel:(ProfileModel *)model {
     NSString *guid = profile[KEY_GUID];
     DLog(@"Remove profile with guid %@...", guid);
     if ([model numberOfBookmarks] == 1) {
         DLog(@"Refusing to remove only profile");
-        return;
+        return NO;
     }
 
     DLog(@"Removing key bindings that reference the guid being removed");
@@ -687,6 +700,7 @@ const NSTimeInterval kMinimumAntiIdlePeriod = 1.0;
     [[NSNotificationCenter defaultCenter] postNotificationName:kProfileWasDeletedNotification
                                                         object:nil];
     [model flush];
+    return YES;
 }
 
 + (void)removeKeyMappingsReferringToGuid:(NSString *)badRef {

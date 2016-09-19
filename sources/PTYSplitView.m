@@ -17,9 +17,11 @@
     iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
     switch (preferredStyle) {
         case TAB_STYLE_LIGHT:
+        case TAB_STYLE_LIGHT_HIGH_CONTRAST:
             return [NSColor lightGrayColor];
             break;
         case TAB_STYLE_DARK:
+        case TAB_STYLE_DARK_HIGH_CONTRAST:
             return [NSColor darkGrayColor];
             break;
     }
@@ -42,6 +44,9 @@
 
 - (void)mouseDown:(NSEvent *)theEvent
 {
+    if (self.subviews.count == 0) {
+        return;
+    }
     // First, find the splitter that was clicked on. It will be the one closest
     // to the mouse. The OS seems to give a bit of wiggle room so it's not
     // necessary exactly under the mouse.

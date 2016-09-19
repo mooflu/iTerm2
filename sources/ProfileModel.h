@@ -27,6 +27,9 @@
 // Notification posted when a stored profile changes.
 extern NSString *const kReloadAddressBookNotification;
 
+// All profiles should be reloaded.
+extern NSString *const kReloadAllProfiles;
+
 #define BMKEY_BOOKMARKS_ARRAY @"Bookmarks Array"
 
 #define Profile NSDictionary
@@ -49,6 +52,10 @@ typedef struct {
     NSUserDefaults* prefs_;
     BOOL postChanges_;              // should change notifications be posted?
 }
+
+@property(nonatomic, readonly) NSString *modelName;
+
+- (instancetype)init NS_UNAVAILABLE;
 
 + (ProfileModel*)sharedInstance;
 + (ProfileModel*)sessionsInstance;
@@ -89,6 +96,7 @@ typedef struct {
 - (NSArray*)allTags;
 - (BOOL)bookmark:(Profile*)bookmark hasTag:(NSString*)tag;
 - (Profile*)setObject:(id)object forKey:(NSString*)key inBookmark:(Profile*)bookmark;
+- (Profile *)setObjectsFromDictionary:(NSDictionary *)dictionary inProfile:(Profile *)bookmark;
 - (void)setDefaultByGuid:(NSString*)guid;
 - (void)moveGuid:(NSString*)guid toRow:(int)row;
 - (void)rebuildMenus;
@@ -107,6 +115,9 @@ typedef struct {
 
 // Write to user defaults
 - (void)flush;
+
+// Returns the profile to be used for tmux sessions.
+- (Profile *)tmuxProfile;
 
 // Tell all listeners that the model has changed.
 - (void)postChangeNotification;

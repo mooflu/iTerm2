@@ -96,7 +96,7 @@
 #define KEY_ACTION_HEX_CODE             11
 #define KEY_ACTION_TEXT                 12
 #define KEY_ACTION_IGNORE               13
-#define KEY_ACTION_IR_FORWARD           14
+#define KEY_ACTION_IR_FORWARD           14  // Deprecated
 #define KEY_ACTION_IR_BACKWARD          15
 #define KEY_ACTION_SEND_C_H_BACKSPACE   16
 #define KEY_ACTION_SEND_C_QM_BACKSPACE  17
@@ -143,6 +143,10 @@
 // Given a key combination of the form 0xKeycode-0xModifiers, return a human-
 // readable representation (e.g., ^X)
 + (NSString *)formatKeyCombination:(NSString *)theKeyCombination;
+
+// Given a keycode and a modifier return 0xKeycode-0xModifiers
++ (NSString *)identifierForCharacterIgnoringModifiers:(unichar)characterIgnoringModifiers
+                                            modifiers:(NSEventModifierFlags)keyMods;
 
 // Given a dictionary with keys Action->int, Text->string, return a human-readable
 // description (e.g., "Send text: foo"). The action comes from the KEY_ACTION_xxx

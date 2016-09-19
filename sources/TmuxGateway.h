@@ -31,7 +31,7 @@ extern NSString * const kTmuxGatewayErrorDomain;
 - (void)tmuxWindowClosedWithId:(int)windowId;
 - (void)tmuxWindowRenamedWithId:(int)windowId to:(NSString *)newName;
 - (void)tmuxHostDisconnected;
-- (void)tmuxWriteData:(NSData *)data;
+- (void)tmuxWriteString:(NSString *)string;
 - (void)tmuxReadTask:(NSData *)data;
 - (void)tmuxSessionChanged:(NSString *)sessionName
 				 sessionId:(int)sessionId;
@@ -43,6 +43,9 @@ extern NSString * const kTmuxGatewayErrorDomain;
 - (void)tmuxSetSecureLogging:(BOOL)secureLogging;
 - (void)tmuxPrintLine:(NSString *)line;
 - (NSWindowController<iTermWindowController> *)tmuxGatewayWindow;
+- (void)tmuxInitialCommandDidCompleteSuccessfully;
+- (void)tmuxInitialCommandDidFailWithError:(NSString *)error;
+- (void)tmuxCannotSendCharactersInSupplementaryPlanes:(NSString *)string windowPane:(int)windowPane;
 
 @end
 
@@ -59,6 +62,8 @@ typedef NS_ENUM(NSInteger, ControlCommand) {
 @property(nonatomic, assign) BOOL tmuxLogging;
 @property(nonatomic, readonly) NSWindowController<iTermWindowController> *window;
 @property(nonatomic, readonly) id<TmuxGatewayDelegate> delegate;
+@property(nonatomic, retain) NSDecimalNumber *minimumServerVersion;
+@property(nonatomic, retain) NSDecimalNumber *maximumServerVersion;
 
 - (instancetype)initWithDelegate:(id<TmuxGatewayDelegate>)delegate;
 
@@ -92,7 +97,7 @@ typedef NS_ENUM(NSInteger, ControlCommand) {
                         responseObject:(id)obj
                                  flags:(int)flags;
 
-- (void)sendKeys:(NSData *)data toWindowPane:(int)windowPane;
+- (void)sendKeys:(NSString *)string toWindowPane:(int)windowPane;
 - (void)detach;
 
 @end

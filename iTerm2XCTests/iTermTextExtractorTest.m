@@ -10,10 +10,13 @@
 #import "iTermPreferences.h"
 #import "iTermSelectorSwizzler.h"
 #import "iTermTextExtractor.h"
+#import "NSStringITerm.h"
 #import "ScreenChar.h"
 #import "SmartSelectionController.h"
 #import <OCHamcrest/OCHamcrest.h>
 #import <OCMockito/OCMockito.h>
+
+static const NSInteger kUnicodeVersion = 9;
 
 @interface iTermTextExtractorTest : XCTestCase<iTermTextDataSource>
 
@@ -21,7 +24,7 @@
 
 @implementation iTermTextExtractorTest {
     screen_char_t *_buffer;
-    NSArray<NSString *> *_lines;
+    NSArray *_lines;  // Contains either NSString* or NSData*.
 }
 
 - (void)tearDown {
@@ -83,6 +86,33 @@
                            extraWordCharacters:@"-"];
 }
 
+- (void)testChineseWithWhitelistedCharacters {
+    NSString *line = @"真的-真的";
+    NSArray *words = @[ @"真的-真的",  // 真
+                        @"真的-真的",  // 真 DWC
+                        @"真的-真的",  // 的
+                        @"真的-真的",  // 的 DWC
+                        @"真的-真的",  // -
+                        @"真的-真的",  // 真
+                        @"真的-真的",  // 真 DWC
+                        @"真的-真的",  // 的
+                        @"真的-真的" ];  // 的 DWC
+    [self performTestForWordSelectionUsingLine:line
+                          wordForEachCharacter:words
+                           extraWordCharacters:@"-"];
+}
+
+- (void)testSurrogatePairWordSelection {
+    NSString *line = @"𦍌次";
+    NSArray *words = @[ @"𦍌",
+                        @"𦍌",  // DWC_RIGHT
+                        @"次",
+                        @"次"];  // DWC_RIGHT
+    [self performTestForWordSelectionUsingLine:line
+                          wordForEachCharacter:words
+                           extraWordCharacters:@"-"];
+}
+
 - (void)performTestForWordSelectionUsingLine:(NSString *)line
                         wordForEachCharacter:(NSArray<NSString *> *)expected
                          extraWordCharacters:(NSString *)extraWordCharacters {
@@ -97,7 +127,8 @@
                                   forBlock:^{
                                       VT100GridWindowedRange range;
                                       for (int i = 0; i < line.length; i++) {
-                                          range = [extractor rangeForWordAt:VT100GridCoordMake(i, 0)];
+                                          range = [extractor rangeForWordAt:VT100GridCoordMake(i, 0)
+                                                              maximumLength:kReasonableMaximumWordLength];
                                           NSString *actual = [self stringForRange:range];
                                           XCTAssertEqualObjects(actual, expected[i],
                                                                 @"For click at %@ got a range of %@ giving “%@”, while I expected “%@”",
@@ -150,13 +181,155 @@
     return string;
 }
 
-#pragma mark - iTermTextDataSource
+- (void)testRangeByTrimmingWhitespace_TrimBothEnds {
+  _lines = @[ @"  foo  " ];
+  iTermTextExtractor *extractor = [iTermTextExtractor textExtractorWithDataSource:self];
+  VT100GridAbsCoordRange actual = [extractor rangeByTrimmingWhitespaceFromRange:VT100GridAbsCoordRangeMake(0, 0, 7, 0)];
+  VT100GridAbsCoordRange expected = VT100GridAbsCoordRangeMake(2, 0, 5, 0);
+  XCTAssertEqual(actual.start.x, expected.start.x);
+  XCTAssertEqual(actual.start.y, expected.start.y);
+  XCTAssertEqual(actual.end.x, expected.end.x);
+  XCTAssertEqual(actual.end.y, expected.end.y);
+}
 
-- (int)lengthOfLineAtIndex:(int)theIndex withBuffer:(screen_char_t *)buffer {
+- (void)testRangeByTrimmingWhitespace_TrimLeft {
+  _lines = @[ @"  foo" ];
+  iTermTextExtractor *extractor = [iTermTextExtractor textExtractorWithDataSource:self];
+  VT100GridAbsCoordRange actual = [extractor rangeByTrimmingWhitespaceFromRange:VT100GridAbsCoordRangeMake(0, 0, 5, 0)];
+  VT100GridAbsCoordRange expected = VT100GridAbsCoordRangeMake(2, 0, 5, 0);
+  XCTAssertEqual(actual.start.x, expected.start.x);
+  XCTAssertEqual(actual.start.y, expected.start.y);
+  XCTAssertEqual(actual.end.x, expected.end.x);
+  XCTAssertEqual(actual.end.y, expected.end.y);
+}
+
+- (void)testRangeByTrimmingWhitespace_TrimRight {
+  _lines = @[ @"foo  " ];
+  iTermTextExtractor *extractor = [iTermTextExtractor textExtractorWithDataSource:self];
+  VT100GridAbsCoordRange actual = [extractor rangeByTrimmingWhitespaceFromRange:VT100GridAbsCoordRangeMake(0, 0, 5, 0)];
+  VT100GridAbsCoordRange expected = VT100GridAbsCoordRangeMake(0, 0, 3, 0);
+  XCTAssertEqual(actual.start.x, expected.start.x);
+  XCTAssertEqual(actual.start.y, expected.start.y);
+  XCTAssertEqual(actual.end.x, expected.end.x);
+  XCTAssertEqual(actual.end.y, expected.end.y);
+}
+
+- (void)testRangeByTrimmingWhitespace_NothingToTrim {
+  _lines = @[ @"foo" ];
+  iTermTextExtractor *extractor = [iTermTextExtractor textExtractorWithDataSource:self];
+  VT100GridAbsCoordRange actual = [extractor rangeByTrimmingWhitespaceFromRange:VT100GridAbsCoordRangeMake(0, 0, 3, 0)];
+  VT100GridAbsCoordRange expected = VT100GridAbsCoordRangeMake(0, 0, 3, 0);
+  XCTAssertEqual(actual.start.x, expected.start.x);
+  XCTAssertEqual(actual.start.y, expected.start.y);
+  XCTAssertEqual(actual.end.x, expected.end.x);
+  XCTAssertEqual(actual.end.y, expected.end.y);
+}
+
+- (void)testRangeByTrimmingWhitespace_MultiLine {
+  _lines = @[ @"  fooba", @"123456 ", @"       " ];
+  iTermTextExtractor *extractor = [iTermTextExtractor textExtractorWithDataSource:self];
+  VT100GridAbsCoordRange actual = [extractor rangeByTrimmingWhitespaceFromRange:VT100GridAbsCoordRangeMake(0, 0, 7, 2)];
+  VT100GridAbsCoordRange expected = VT100GridAbsCoordRangeMake(2, 0, 6, 1);
+  XCTAssertEqual(actual.start.x, expected.start.x);
+  XCTAssertEqual(actual.start.y, expected.start.y);
+  XCTAssertEqual(actual.end.x, expected.end.x);
+  XCTAssertEqual(actual.end.y, expected.end.y);
+}
+
+- (void)testContentInRange_TruncateHeadAndTail {
+    // Make a big array like
+    // abc
+    // ***
+    // ... repeats many times ...
+    // ***
+    // xyz
+    NSMutableArray *temp = [NSMutableArray array];
+    NSUInteger length = 0;
+    [temp addObject:@"abc"];
+    while (length < 1024*200) {
+        [temp addObject:@"***"];
+        length += 3;
+    }
+    [temp addObject:@"xyz"];
+    _lines = temp;
+
+    // Extract the whole range but truncate it 3 bytes at the head.
+    iTermTextExtractor *extractor = [iTermTextExtractor textExtractorWithDataSource:self];
+    VT100GridWindowedRange range = VT100GridWindowedRangeMake(VT100GridCoordRangeMake(0, 0, 3, _lines.count), 0, 0);
+    NSString *actual = [extractor contentInRange:range
+                               attributeProvider:nil
+                                      nullPolicy:kiTermTextExtractorNullPolicyMidlineAsSpaceIgnoreTerminal
+                                             pad:NO
+                              includeLastNewline:NO
+                          trimTrailingWhitespace:NO
+                                    cappedAtSize:3
+                                    truncateTail:NO
+                               continuationChars:nil
+                                          coords:nil];
+    XCTAssertEqualObjects(@"xyz", actual);
+
+    // Same thing but truncate to 3 bytes at the tail.
+    actual = [extractor contentInRange:range
+                     attributeProvider:nil
+                            nullPolicy:kiTermTextExtractorNullPolicyMidlineAsSpaceIgnoreTerminal
+                                   pad:NO
+                    includeLastNewline:NO
+                trimTrailingWhitespace:NO
+                          cappedAtSize:3
+                          truncateTail:YES
+                     continuationChars:nil
+                                coords:nil];
+    XCTAssertEqualObjects(@"abc", actual);
+}
+
+- (void)testContentInRange_RemoveTabFillers {
+    NSString *line = @"a\uf001\uf001\tb";
+    NSMutableData *data = [NSMutableData dataWithLength:(line.length + 1) * sizeof(screen_char_t)];
+    
     screen_char_t color = { 0 };
     int len = 0;
-    StringToScreenChars(_lines[0],
-                        buffer,
+    StringToScreenChars(line,
+                        data.mutableBytes,
+                        color,
+                        color,
+                        &len,
+                        NO,
+                        NULL,
+                        NULL,
+                        NO,
+                        kUnicodeVersion);
+    screen_char_t *buffer = data.mutableBytes;
+    // Turn replacement characters into tab fillers. StringToScreenChars removes private range codes.
+    buffer[1].code = 0xf001;
+    buffer[2].code = 0xf001;
+    buffer[len].code = EOL_SOFT;
+
+    _lines = @[ data ];
+
+    iTermTextExtractor *extractor = [iTermTextExtractor textExtractorWithDataSource:self];
+    VT100GridWindowedRange range = VT100GridWindowedRangeMake(VT100GridCoordRangeMake(0, 0, 5, 1), 0, 0);
+    NSString *actual = [extractor contentInRange:range
+                               attributeProvider:nil
+                                      nullPolicy:kiTermTextExtractorNullPolicyMidlineAsSpaceIgnoreTerminal
+                                             pad:NO
+                              includeLastNewline:NO
+                          trimTrailingWhitespace:NO
+                                    cappedAtSize:-1
+                                    truncateTail:NO
+                               continuationChars:nil
+                                          coords:nil];
+    XCTAssertEqualObjects(@"a\tb", actual);
+
+}
+
+- (void)testContentInRange_ConvertOrphanTabFillersToSpaces {
+    NSString *line = @"ab\uf001\uf001c";
+    NSMutableData *data = [NSMutableData dataWithLength:(line.length + 1) * sizeof(screen_char_t)];
+    
+    screen_char_t color = { 0 };
+    int len = 0;
+    StringToScreenChars(line,
+                        data.mutableBytes,
                         color,
                         color,
                         &len,
@@ -164,13 +337,63 @@
                         NULL,
                         NULL,
                         NO);
-    return len;
+    screen_char_t *buffer = data.mutableBytes;
+    // Turn replacement characters into tab fillers. StringToScreenChars removes private range codes.
+    buffer[2].code = 0xf001;
+    buffer[3].code = 0xf001;
+    buffer[len].code = EOL_SOFT;
+
+    _lines = @[ data ];
+
+    iTermTextExtractor *extractor = [iTermTextExtractor textExtractorWithDataSource:self];
+    VT100GridWindowedRange range = VT100GridWindowedRangeMake(VT100GridCoordRangeMake(0, 0, 5, 1), 0, 0);
+    NSString *actual = [extractor contentInRange:range
+                               attributeProvider:nil
+                                      nullPolicy:kiTermTextExtractorNullPolicyMidlineAsSpaceIgnoreTerminal
+                                             pad:NO
+                              includeLastNewline:NO
+                          trimTrailingWhitespace:NO
+                                    cappedAtSize:-1
+                                    truncateTail:NO
+                               continuationChars:nil
+                                          coords:nil];
+    XCTAssertEqualObjects(@"ab  c", actual);
+}
+
+#pragma mark - iTermTextDataSource
+
+- (int)lengthOfLineAtIndex:(int)theIndex withBuffer:(screen_char_t *)buffer {
+    if ([_lines[0] isKindOfClass:[NSData class]]) {
+        NSData *data = _lines[0];
+        int length = (data.length / sizeof(screen_char_t)) - 1;
+        memmove(buffer, data.bytes, length * sizeof(screen_char_t));
+        return length;
+    } else {
+        screen_char_t color = { 0 };
+        int len = 0;
+        StringToScreenChars(_lines[0],
+                            buffer,
+                            color,
+                            color,
+                            &len,
+                            NO,
+                            NULL,
+                            NULL,
+                            NO,
+                            kUnicodeVersion);
+        return len;
+    }
 }
 
 - (int)width {
-    assert([_lines[0] length] < 50);
-    screen_char_t temp[100];
-    return [self lengthOfLineAtIndex:0 withBuffer:temp];
+    if ([_lines[0] isKindOfClass:[NSData class]]) {
+        NSData *data = _lines[0];
+        return (data.length / sizeof(screen_char_t)) - 1;
+    } else {
+        assert([_lines[0] length] < 50);
+        screen_char_t temp[100];
+        return [self lengthOfLineAtIndex:0 withBuffer:temp];
+    }
 }
 
 - (int)numberOfLines {
@@ -182,19 +405,24 @@
         free(_buffer);
     }
     _buffer = malloc(sizeof(screen_char_t) * (self.width + 1));
-
-    screen_char_t color = { 0 };
-    int len = 0;
-    StringToScreenChars(_lines[theIndex],
-                        _buffer,
-                        color,
-                        color,
-                        &len,
-                        NO,
-                        NULL,
-                        NULL,
-                        NO);
-    _buffer[len].code = EOL_SOFT;
+    if ([_lines[0] isKindOfClass:[NSData class]]) {
+        NSData *data = _lines[theIndex];
+        memmove(_buffer, data.bytes, sizeof(screen_char_t) * (self.width + 1));
+    } else {
+        screen_char_t color = { 0 };
+        int len = 0;
+        StringToScreenChars(_lines[theIndex],
+                            _buffer,
+                            color,
+                            color,
+                            &len,
+                            NO,
+                            NULL,
+                            NULL,
+                            NO,
+                            kUnicodeVersion);
+        _buffer[len].code = EOL_SOFT;
+    }
     
     return _buffer;
 }

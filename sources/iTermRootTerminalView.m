@@ -16,11 +16,9 @@
 #import "iTermToolbeltView.h"
 #import "PTYTabView.h"
 
-const CGFloat kHorizontalTabBarHeight = 22;
-const CGFloat kDefaultLeftTabsWidth = 150;
+const CGFloat kHorizontalTabBarHeight = 24;
 const CGFloat kDivisionViewHeight = 1;
 
-static const CGFloat kDefaultToolbeltWidth = 250;
 static const CGFloat kMinimumToolbeltSizeInPoints = 100;
 static const CGFloat kMinimumToolbeltSizeAsFractionOfWindow = 0.05;
 static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
@@ -37,6 +35,7 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
 
 @implementation iTermRootTerminalView {
     BOOL _tabViewFrameReduced;
+    BOOL _haveShownToolbelt;
 }
 
 - (instancetype)initWithFrame:(NSRect)frameRect
@@ -48,7 +47,7 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
         _delegate = delegate;
 
         self.autoresizesSubviews = YES;
-        _leftTabBarWidth = kDefaultLeftTabsWidth;
+        _leftTabBarWidth = [iTermPreferences doubleForKey:kPreferenceKeyLeftTabBarWidth];
         // Create the tab view.
         self.tabView = [[[PTYTabView alloc] initWithFrame:self.bounds] autorelease];
         _tabView.autoresizingMask = (NSViewWidthSizable | NSViewHeightSizable);
@@ -89,9 +88,8 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
         _tabBarControl.delegate = tabBarDelegate;
         _tabBarControl.hideForSingleTab = NO;
 
-        // Create the toolbelt
-        // A decent default value.
-        _toolbeltWidth = kDefaultToolbeltWidth;
+        // Create the toolbelt with its current default size.
+        _toolbeltWidth = [iTermPreferences floatForKey:kPreferenceKeyDefaultToolbeltWidth];
         [self constrainToolbeltWidth];
 
         self.toolbelt = [[[iTermToolbeltView alloc] initWithFrame:self.toolbeltFrame
@@ -112,8 +110,8 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
 
     [_divisionView release];
     [_toolbelt release];
-    self.leftTabBarDragHandle.delegate = nil;
-    [self.leftTabBarDragHandle release];
+    _leftTabBarDragHandle.delegate = nil;
+    [_leftTabBarDragHandle release];
 
     [super dealloc];
 }
@@ -178,7 +176,10 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
     if (shouldShowToolbelt == _shouldShowToolbelt) {
         return;
     }
-
+    if (shouldShowToolbelt && !_haveShownToolbelt) {
+        _toolbeltWidth = [iTermPreferences floatForKey:kPreferenceKeyDefaultToolbeltWidth];
+        _haveShownToolbelt = YES;
+    }
     _shouldShowToolbelt = shouldShowToolbelt;
     _toolbelt.hidden = !shouldShowToolbelt;
     if (shouldShowToolbelt) {
@@ -397,7 +398,7 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
                                                               dragHandleWidth,
                                                               NSHeight(self.tabBarControl.frame));
                 if (!self.leftTabBarDragHandle) {
-                    self.leftTabBarDragHandle = [[iTermDragHandleView alloc] initWithFrame:leftTabBarDragHandleFrame];
+                    self.leftTabBarDragHandle = [[[iTermDragHandleView alloc] initWithFrame:leftTabBarDragHandleFrame] autorelease];
                     self.leftTabBarDragHandle.delegate = self;
                     [self addSubview:self.leftTabBarDragHandle];
                 } else {
@@ -420,6 +421,7 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
         [self.tabBarControl setCellMinWidth:[iTermAdvancedSettingsModel minTabWidth]];
     }
     [self.tabBarControl setSizeCellsToFit:[iTermAdvancedSettingsModel useUnevenTabs]];
+    [self.tabBarControl setStretchCellsToFit:[iTermPreferences boolForKey:kPreferenceKeyStretchTabsToFillBar]];
     [self.tabBarControl setCellOptimumWidth:[iTermAdvancedSettingsModel optimumTabWidth]];
     self.tabBarControl.smartTruncation = [iTermAdvancedSettingsModel tabTitlesUseSmartTruncation];
     
@@ -463,6 +465,8 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
     CGFloat originalValue = _leftTabBarWidth;
     _leftTabBarWidth += delta;
     [self layoutSubviews];  // This may modify _leftTabBarWidth if it's too big or too small.
+    [[NSUserDefaults standardUserDefaults] setDouble:_leftTabBarWidth
+                                              forKey:kPreferenceKeyLeftTabBarWidth];
     return _leftTabBarWidth - originalValue;
 }
 

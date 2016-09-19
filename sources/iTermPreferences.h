@@ -20,7 +20,9 @@ typedef NS_ENUM(NSInteger, iTermOpenTmuxWindowsMode) {
 // Values for kPreferenceKeyTabStyle. Do not alter values in this enumeration as they are saved in the preferences.
 typedef NS_ENUM(int, iTermPreferencesTabStyle) {
     TAB_STYLE_LIGHT = 0,
-    TAB_STYLE_DARK = 1
+    TAB_STYLE_DARK = 1,
+    TAB_STYLE_LIGHT_HIGH_CONTRAST = 2,
+    TAB_STYLE_DARK_HIGH_CONTRAST = 3
 };
 
 // Values for kPreferenceKeyTabPosition (corresponds to tags in control).
@@ -77,9 +79,12 @@ extern NSString *const kPreferenceKeyHideTabBar;
 extern NSString *const kPreferenceKeyHideTabNumber;
 extern NSString *const kPreferenceKeyHideTabCloseButton;
 extern NSString *const kPreferenceKeyHideTabActivityIndicator;
+extern NSString *const kPreferenceKeyShowNewOutputIndicator;
 extern NSString *const kPreferenceKeyShowPaneTitles;
 extern NSString *const kPreferenceKeyHideMenuBarInFullscreen;
+extern NSString *const kPreferenceKeyUIElement;
 extern NSString *const kPreferenceKeyFlashTabBarInFullscreen;
+extern NSString *const kPreferenceKeyStretchTabsToFillBar;
 extern NSString *const kPreferenceKeyShowWindowNumber;
 extern NSString *const kPreferenceKeyShowJobName;
 extern NSString *const kPreferenceKeyShowProfileName;
@@ -89,6 +94,7 @@ extern NSString *const kPreferenceKeyDimInactiveSplitPanes;
 extern NSString *const kPreferenceKeyShowWindowBorder;
 extern NSString *const kPreferenceKeyHideScrollbar;
 extern NSString *const kPreferenceKeyDisableFullscreenTransparencyByDefault;
+extern NSString *const kPreferenceKeyEnableDivisionView;
 extern NSString *const kPreferenceKeyDimBackgroundWindows;
 
 // Keys
@@ -100,13 +106,16 @@ extern NSString *const kPreferenceKeyRightCommandRemapping;
 extern NSString *const kPreferenceKeySwitchPaneModifier;
 extern NSString *const kPreferenceKeySwitchTabModifier;
 extern NSString *const kPreferenceKeySwitchWindowModifier;
+
 extern NSString *const kPreferenceKeyHotkeyEnabled;
 extern NSString *const kPreferenceKeyHotKeyCode;
 extern NSString *const kPreferenceKeyHotkeyCharacter;
 extern NSString *const kPreferenceKeyHotkeyModifiers;
-extern NSString *const kPreferenceKeyHotKeyTogglesWindow;
-extern NSString *const kPreferenceKeyHotkeyProfileGuid;
-extern NSString *const kPreferenceKeyHotkeyAutoHides;
+
+// Migration to multi-hotkey window will move these settings into a profile.
+extern NSString *const kPreferenceKeyHotKeyTogglesWindow_Deprecated;  // Deprecated
+extern NSString *const kPreferenceKeyHotkeyProfileGuid_Deprecated;  // Deprecated
+extern NSString *const kPreferenceKeyHotkeyAutoHides_Deprecated;  // Deprecated
 
 // Pointer
 extern NSString *const kPreferenceKeyCmdClickOpensURLs;
@@ -133,10 +142,18 @@ extern NSString *const kPreferenceKeyPasteSpecialConvertUnicodePunctuation;
 extern NSString *const kPreferenceKeyPasteSpecialConvertDosNewlines;
 extern NSString *const kPreferenceKeyPasteSpecialRemoveControlCodes;
 extern NSString *const kPreferenceKeyPasteSpecialBracketedPasteMode;
+extern NSString *const kPreferencesKeyPasteSpecialUseRegexSubstitution;
+extern NSString *const kPreferencesKeyPasteSpecialRegex;
+extern NSString *const kPreferencesKeyPasteSpecialSubstitution;
+extern NSString *const kPreferenceKeyLeftTabBarWidth;
 
 extern NSString *const kPreferenceKeyPasteWarningNumberOfSpacesPerTab;
 
 extern NSString *const kPreferenceKeyShowFullscreenTabBar;
+extern NSString *const kPreferenceKeyDefaultToolbeltWidth;
+
+// Set to YES on the first launch of a version that supports multiple hotkey windows.
+extern NSString *const kPreferenceKeyHotkeyMigratedFromSingleToMulti;
 
 @interface iTermPreferences : NSObject
 
@@ -152,6 +169,9 @@ extern NSString *const kPreferenceKeyShowFullscreenTabBar;
 
 + (int)intForKey:(NSString *)key;
 + (void)setInt:(int)value forKey:(NSString *)key;
+
++ (NSInteger)integerForKey:(NSString *)key;
++ (void)setInteger:(NSInteger)value forKey:(NSString *)key;
 
 + (NSUInteger)unsignedIntegerForKey:(NSString *)key;
 + (void)setUnsignedInteger:(NSUInteger)value forKey:(NSString *)key;

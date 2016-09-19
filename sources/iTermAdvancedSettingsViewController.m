@@ -11,6 +11,8 @@
 #import "NSApplication+iTerm.h"
 #import <objc/runtime.h>
 
+NSString *const iTermAdvancedSettingsDidChange = @"iTermAdvancedSettingsDidChange";
+
 typedef enum {
     kiTermAdvancedSettingTypeBoolean,
     kiTermAdvancedSettingTypeInteger,
@@ -199,7 +201,10 @@ static NSDictionary *gIntrospection;
         for (int i = 0; i < methodCount; i++) {
             SEL name = method_getName(methods[i]);
             NSString *stringName = NSStringFromSelector(name);
-            if (![internalMethods containsObject:stringName]) {
+            // Ignore selectors ending with : because they are setters.
+            if (![internalMethods containsObject:stringName] &&
+                ![stringName hasSuffix:@":"] &&
+                ![stringName hasSuffix:@"UserDefaultsKey"]) {
                 [iTermAdvancedSettingsModel performSelector:name withObject:nil];
                 assert(gIntrospection != nil);
                 [settings addObject:gIntrospection];
@@ -217,7 +222,13 @@ static NSDictionary *gIntrospection;
 }
 
 - (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
     [_filteredAdvancedSettings release];
+    // For reasons I don't understand the tableview outlives this view by a small amount.
+    // To reproduce, select a row in advanced prefs. Switch to the profiles tab. Press esc to close
+    // the prefs window. Doesn't reproduce all the time.
+    _tableView.delegate = nil;
+    _tableView.dataSource = nil;
     [super dealloc];
 }
 
@@ -227,6 +238,11 @@ static NSDictionary *gIntrospection;
     [_tableView setGridStyleMask:NSTableViewGridNone];
     [_tableView setIntercellSpacing:NSMakeSize(0, 0)];
     [_tableView setBackgroundColor:[NSColor whiteColor]];
+
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(advancedSettingsDidChange:)
+                                                 name:iTermAdvancedSettingsDidChange
+                                               object:nil];
 }
 
 - (NSMutableAttributedString *)attributedStringForString:(NSString *)string
@@ -239,7 +255,7 @@ static NSDictionary *gIntrospection;
                                                                      attributes:spacerAttributes] autorelease];
     NSDictionary *attributes =
         @{ NSFontAttributeName: bold ? [NSFont boldSystemFontOfSize:size] : [NSFont systemFontOfSize:size],
-           NSForegroundColorAttributeName: selected ? [NSColor whiteColor] : [NSColor blackColor] };
+           NSForegroundColorAttributeName: (selected && self.view.window.isKeyWindow) ? [NSColor whiteColor] : [NSColor blackColor] };
     NSAttributedString *title = [[[NSAttributedString alloc] initWithString:string
                                                                  attributes:attributes] autorelease];
     NSMutableAttributedString *result = [[[NSMutableAttributedString alloc] init] autorelease];
@@ -310,7 +326,7 @@ static NSDictionary *gIntrospection;
                                    selected:tableView.selectedRow == row
                                        bold:NO];
         if (subtitle) {
-            NSColor *color = (tableView.selectedRow == row) ? [NSColor whiteColor] : [NSColor grayColor];
+            NSColor *color = (tableView.selectedRow == row && self.view.window.isKeyWindow) ? [NSColor whiteColor] : [NSColor grayColor];
             NSDictionary *attributes = @{ NSForegroundColorAttributeName: color,
                                           NSFontAttributeName: [NSFont systemFontOfSize:11] };
             NSAttributedString *attributedSubtitle =
@@ -384,6 +400,12 @@ static NSDictionary *gIntrospection;
 
     return _filteredAdvancedSettings;
 }
+
+- (void)advancedSettingsDidChange:(NSNotification *)notification {
+    [_tableView reloadData];
+}
+
+#pragma mark - NSTableViewDataSource
 
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView {
     return [[self filteredAdvancedSettings] count];

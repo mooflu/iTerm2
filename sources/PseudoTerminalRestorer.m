@@ -44,7 +44,7 @@ static BOOL gWaitingForFullScreen;
 + (void)runQueuedBlocks_10_10_andEarlier {
     DLog(@"runQueuedBlocks (<=10.10) starting");
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0),
-                   dispatch_get_current_queue(),
+                   dispatch_get_main_queue(),
                    ^{
                        for (VoidBlock block in queuedBlocks) {
                            block();
@@ -97,23 +97,19 @@ static BOOL gWaitingForFullScreen;
         return;
     }
 
-    if (![[iTermOrphanServerAdopter sharedInstance] haveOrphanServers]) {
-        // We don't respect the startup preference if orphan servers are present. Just restore things
-        // as best we can.
-        if ([iTermPreferences boolForKey:kPreferenceKeyOpenArrangementAtStartup]) {
-            DLog(@"Abort because opening arrangement at startup");
-            NSDictionary *arrangement =
-                [state decodeObjectForKey:kPseudoTerminalStateRestorationWindowArrangementKey];
-            if (arrangement) {
-                [PseudoTerminal registerSessionsInArrangement:arrangement];
-            }
-            completionHandler(nil, nil);
-            return;
-        } else if ([iTermPreferences boolForKey:kPreferenceKeyOpenNoWindowsAtStartup]) {
-            DLog(@"Abort because opening no windows at startup");
-            completionHandler(nil, nil);
-            return;
+    if ([iTermPreferences boolForKey:kPreferenceKeyOpenArrangementAtStartup]) {
+        DLog(@"Abort because opening arrangement at startup");
+        NSDictionary *arrangement =
+            [state decodeObjectForKey:kTerminalWindowStateRestorationWindowArrangementKey];
+        if (arrangement) {
+            [PseudoTerminal registerSessionsInArrangement:arrangement];
         }
+        completionHandler(nil, nil);
+        return;
+    } else if ([iTermPreferences boolForKey:kPreferenceKeyOpenNoWindowsAtStartup]) {
+        DLog(@"Abort because opening no windows at startup");
+        completionHandler(nil, nil);
+        return;
     }
 
     if (!queuedBlocks) {
@@ -124,13 +120,14 @@ static BOOL gWaitingForFullScreen;
                                                      name:kApplicationDidFinishLaunchingNotification
                                                    object:nil];
     }
-    NSDictionary *arrangement = [state decodeObjectForKey:kPseudoTerminalStateRestorationWindowArrangementKey];
+    NSDictionary *arrangement = [state decodeObjectForKey:kTerminalWindowStateRestorationWindowArrangementKey];
     if (arrangement) {
         DLog(@"Have an arrangement");
         VoidBlock theBlock = ^{
             DLog(@"PseudoTerminalRestorer block running for id %@", identifier);
             DLog(@"Creating term");
-            PseudoTerminal *term = [PseudoTerminal bareTerminalWithArrangement:arrangement];
+            PseudoTerminal *term = [PseudoTerminal bareTerminalWithArrangement:arrangement
+                                                      forceOpeningHotKeyWindow:NO];
             DLog(@"Create a new terminal %@", term);
             if (!term) {
                 DLog(@"Failed to create term");
@@ -154,6 +151,15 @@ static BOOL gWaitingForFullScreen;
                     [term performSelector:@selector(canonicalizeWindowFrame)
                                withObject:nil
                                afterDelay:0];
+                    break;
+                    
+                case WINDOW_TYPE_LEFT:
+                case WINDOW_TYPE_RIGHT:
+                case WINDOW_TYPE_NORMAL:
+                case WINDOW_TYPE_LEFT_PARTIAL:
+                case WINDOW_TYPE_NO_TITLE_BAR:
+                case WINDOW_TYPE_RIGHT_PARTIAL:
+                case WINDOW_TYPE_LION_FULL_SCREEN:
                     break;
             }
 

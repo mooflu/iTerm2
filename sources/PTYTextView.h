@@ -1,5 +1,4 @@
 #import <Cocoa/Cocoa.h>
-#import "CharacterRun.h"
 #import "ITAddressBookMgr.h"
 #import "iTerm.h"
 #import "iTermColorMap.h"
@@ -73,17 +72,13 @@ typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
 // Contextual menu
 - (void)menuForEvent:(NSEvent *)theEvent menu:(NSMenu *)theMenu;
 - (void)pasteString:(NSString *)aString;
-- (BOOL)textViewCanPasteFile;
-- (void)textViewPasteFileWithBase64Encoding;
 - (void)paste:(id)sender;
 - (void)pasteOptions:(id)sender;
 - (void)textViewFontDidChange;
-- (void)textViewSizeDidChange;
 - (void)textViewDrawBackgroundImageInView:(NSView *)view
                                  viewRect:(NSRect)rect
                    blendDefaultBackground:(BOOL)blendDefaultBackground;
 - (BOOL)textViewHasBackgroundImage;
-- (PTYScrollView *)scrollview;
 - (void)sendEscapeSequence:(NSString *)text;
 - (void)sendHexCode:(NSString *)codes;
 - (void)sendText:(NSString *)text;
@@ -99,16 +94,16 @@ typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
 - (void)selectPaneRightInCurrentTerminal;
 - (void)selectPaneAboveInCurrentTerminal;
 - (void)selectPaneBelowInCurrentTerminal;
-- (void)writeTask:(NSData*)data;
+- (void)writeTask:(NSString *)string;
+- (void)writeStringWithLatin1Encoding:(NSString *)string;
 - (void)textViewDidBecomeFirstResponder;
-- (void)refreshAndStartTimerIfNeeded;
+- (void)refresh;
 - (BOOL)textViewIsActiveSession;
 - (BOOL)textViewSessionIsBroadcastingInput;
 - (BOOL)textViewIsMaximized;
 - (BOOL)textViewTabHasMaximizedPanel;
 - (void)textViewWillNeedUpdateForBlink;
 - (BOOL)textViewDelegateHandlesAllKeystrokes;
-- (BOOL)textViewInSameTabAsTextView:(PTYTextView *)other;
 - (void)textViewSplitVertically:(BOOL)vertically withProfileGuid:(NSString *)guid;
 - (void)textViewSelectNextTab;
 - (void)textViewSelectPreviousTab;
@@ -147,7 +142,9 @@ typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
                           deltaY:(CGFloat)deltaY;
 
 - (VT100GridAbsCoordRange)textViewRangeOfLastCommandOutput;
+- (VT100GridAbsCoordRange)textViewRangeOfCurrentCommand;
 - (BOOL)textViewCanSelectOutputOfLastCommand;
+- (BOOL)textViewCanSelectCurrentCommand;
 - (NSColor *)textViewCursorGuideColor;
 - (BOOL)textViewUseHFSPlusMapping;
 - (NSColor *)textViewBadgeColor;
@@ -163,6 +160,11 @@ typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
 
 // We guess the user is trying to send arrow keys with the scroll wheel in alt screen.
 - (void)textViewThinksUserIsTryingToSendArrowKeysWithScrollWheel:(BOOL)trying;
+
+// Update the text view's frame needed.
+- (void)textViewResizeFrameIfNeeded;
+
+- (NSInteger)textViewUnicodeVersion;
 
 @end
 
@@ -286,6 +288,9 @@ typedef void (^PTYTextViewDrawingHookBlock)(iTermTextDrawingHelper *);
 @property(nonatomic, assign) BOOL showSearchingCursor;
 
 @property(nonatomic, readonly) iTermQuickLookController *quickLookController;
+
+// Returns the desired height of this view that exactly fits its contents.
+@property(nonatomic, readonly) CGFloat desiredHeight;
 
 // Returns the size of a cell for a given font. hspace and vspace are multipliers and the width
 // and height.
@@ -438,7 +443,7 @@ typedef void (^PTYTextViewDrawingHookBlock)(iTermTextDrawingHelper *);
 - (void)updateNoteViewFrames;
 
 // Show a visual highlight of a mark on the given line number.
-- (void)highlightMarkOnLine:(int)line;
+- (void)highlightMarkOnLine:(int)line hasErrorCode:(BOOL)hasErrorCode;
 
 - (IBAction)installShellIntegration:(id)sender;
 
@@ -494,6 +499,8 @@ typedef void (^PTYTextViewDrawingHookBlock)(iTermTextDrawingHelper *);
 
 // Undoes -refuseFirstResponderAtCurrentMouseLocation.
 - (void)resetMouseLocationToRefuseFirstResponderAt;
+
+- (void)setTransparencyAffectsOnlyDefaultBackgroundColor:(BOOL)value;
 
 #pragma mark - Testing only
 

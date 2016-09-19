@@ -2,7 +2,7 @@
 //
 //  NSStringJTerminal.h
 //
-//  Additional fucntion to NSString Class by Category
+//  Additional function to NSString Class by Category
 //  2001.11.13 by Y.Hanahara
 //  2002.05.18 by Kiichi Kusama
 /*
@@ -55,7 +55,9 @@ int decode_utf8_char(const unsigned char * restrict datap,
 
 + (NSString *)stringWithInt:(int)num;
 + (BOOL)isDoubleWidthCharacter:(int)unicode
-        ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth;
+        ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
+                unicodeVersion:(NSInteger)version;
++ (NSString *)stringWithLongCharacter:(UTF32Char)longCharacter;
 
 // Returns the current string on the pasteboard (if any).
 + (NSString *)stringFromPasteboard;
@@ -199,7 +201,7 @@ int decode_utf8_char(const unsigned char * restrict datap,
 // Returns whether |self| is matched by |glob|, which is a shell-like glob pattern (e.g., *x or
 // x*y).
 // Only * is supported as a wildcard.
-- (BOOL)stringMatchesCaseInsensitiveGlobPattern:(NSString *)glob;
+- (BOOL)stringMatchesGlobPattern:(NSString *)glob caseSensitive:(BOOL)caseSensitive;
 
 // Call |block| for each composed character in the string. If it is a single base character or a
 // high surrogate, then |simple| will be valid and |complex| will be nil. Otherwise, |complex| will
@@ -213,6 +215,41 @@ int decode_utf8_char(const unsigned char * restrict datap,
 
 // Returns modified attributes for drawing self fitting size within one point.
 - (NSDictionary *)attributesUsingFont:(NSFont *)font fittingSize:(NSSize)size attributes:(NSDictionary *)attributes;
+
+// Removes trailing zeros from a floating point value, leaving at most one.
+// 1.0000 -> 1.0
+// 1.0010 -> 1.001
+- (NSString *)stringByCompactingFloatingPointString;
+
+// A fast, non-cryto-quality hash.
+- (NSUInteger)hashWithDJB2;
+
+- (NSUInteger)firstCharacter;
+// Is this a phrase enclosed in qutoation marks?
+- (BOOL)isInQuotationMarks;
+
+// Stick punctuation (should be a comma or a period) at the end, placing it
+// before the terminal quotation mark if needed.
+- (NSString *)stringByInsertingTerminalPunctuation:(NSString *)punctuation;
+
+// Escape special characters and wrap result in quotes.
+- (NSString *)stringByEscapingForJSON;
+
+// Escape special characters.
+- (NSString *)stringByEscapingForXML;
+
+// Returns an array of numbers giving code points for each character in the string. Surrogate pairs
+// get combined. Combining marks do not.
+- (NSArray<NSNumber *> *)codePoints;
+
+// Returns a person's surname.
+- (NSString *)surname;
+
+// Contains only digits?
+- (BOOL)isNumeric;
+
+// Modify the range's endpoint to not sever a surrogate pair.
+- (NSRange)makeRangeSafe:(NSRange)range;
 
 @end
 

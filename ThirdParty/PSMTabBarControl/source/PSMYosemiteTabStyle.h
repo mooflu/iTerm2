@@ -8,7 +8,15 @@
 
 #import <Cocoa/Cocoa.h>
 #import "PSMTabStyle.h"
+#import "PSMTabBarControl.h"
 
 @interface PSMYosemiteTabStyle : NSObject<NSCoding, PSMTabStyle>
+
+@property(nonatomic, readonly) PSMTabBarControl *tabBar;
+@property(nonatomic, readonly) BOOL isYosemiteOrLater;
+
+#pragma mark - For subclasses
+
+- (NSColor *)topLineColorSelected:(BOOL)selected;
 
 @end

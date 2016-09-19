@@ -6,16 +6,19 @@
 //
 
 #import "TmuxGateway.h"
-#import "RegexKitLite.h"
+
+#import "iTermApplicationDelegate.h"
 #import "iTermAdvancedSettingsModel.h"
 #import "TmuxController.h"
-#import "iTermApplicationDelegate.h"
+#import "NSArray+iTerm.h"
 #import "NSStringITerm.h"
+#import "RegexKitLite.h"
 #import "VT100Token.h"
 
 NSString * const kTmuxGatewayErrorDomain = @"kTmuxGatewayErrorDomain";;
 const int kTmuxGatewayCommandShouldTolerateErrors = (1 << 0);
 const int kTmuxGatewayCommandWantsData = (1 << 1);
+static const double kVersionNumberComparisonEpsilon = 0.00001;
 
 #define NEWLINE @"\r"
 
@@ -52,6 +55,10 @@ static NSString *kCommandIsLastInList = @"lastInList";
     BOOL detachSent_;
     BOOL acceptNotifications_;  // Initially NO. When YES, respond to notifications.
     NSMutableString *strayMessages_;
+    
+    // When we get the first %begin-%{end,error} we notify the delegate. Until that happens, this is
+    // set to NO.
+    BOOL _initialized;
 }
 
 @synthesize delegate = delegate_;
@@ -72,6 +79,8 @@ static NSString *kCommandIsLastInList = @"lastInList";
     [currentCommandResponse_ release];
     [currentCommandData_ release];
     [strayMessages_ release];
+    [_minimumServerVersion release];
+    [_maximumServerVersion release];
 
     [super dealloc];
 }
@@ -320,8 +329,18 @@ error:
         }
     }
     if ([[currentCommand_ objectForKey:kCommandIsInitial] boolValue]) {
+        DLog(@"Begin accepting notifications");
         acceptNotifications_ = YES;
     }
+    if (!_initialized) {
+        _initialized = YES;
+        if (withError) {
+            [delegate_ tmuxInitialCommandDidFailWithError:currentCommandResponse_];
+        } else {
+            [delegate_ tmuxInitialCommandDidCompleteSuccessfully];
+        }
+    }
+
     [currentCommand_ release];
     currentCommand_ = nil;
     [currentCommandResponse_ release];
@@ -330,8 +349,11 @@ error:
     currentCommandData_ = nil;
 }
 
-- (void)parseBegin:(NSString *)command
-{
+- (void)parseBegin:(NSString *)command {
+    if (currentCommand_) {
+        [self abortWithErrorMessage:@"%begin without %end"];
+        return;
+    }
     int flags = -1;
     // begin commandId commandNumber[ flags]
     // flags = 0: Server-originated command
@@ -357,9 +379,13 @@ error:
         currentCommandResponse_ = [[NSMutableString alloc] init];
         currentCommandData_ = [[NSMutableData alloc] init];
     } else {
-        currentCommand_ = [[commandQueue_ objectAtIndex:0] retain];
-        NSString *commandId = [components objectAtIndex:1];
-        [currentCommand_ setObject:commandId forKey:kCommandId];
+        if (!commandQueue_.count) {
+            [self abortWithErrorMessage:@"%begin with empty command queue"];
+            return;
+        }
+        currentCommand_ = [commandQueue_[0] retain];
+        NSString *commandId = components[1];
+        currentCommand_[kCommandId] = commandId;
         TmuxLog(@"Begin response to %@", [currentCommand_ objectForKey:kCommandString]);
         [currentCommandResponse_ release];
         [currentCommandData_ release];
@@ -391,7 +417,9 @@ error:
     } else if (currentCommand_) {
         TmuxLog(@"Read command response: \"%@\"", command);
     }
-
+    if (!acceptNotifications_) {
+        TmuxLog(@"  Not accepting notifications");
+    }
     // Work around a bug in tmux 1.8: if unlink-window causes the current
     // session to be destroyed, no end guard is printed but %exit may be
     // received.
@@ -462,13 +490,7 @@ error:
         }
         [self hostDisconnected];
     } else if ([command hasPrefix:@"%begin"]) {
-        if (currentCommand_) {
-            [self abortWithErrorMessage:@"%begin without %end"];
-        } else if (!commandQueue_.count) {
-            [self abortWithErrorMessage:@"%begin with empty command queue"];
-        } else {
-            [self parseBegin:command];
-        }
+        [self parseBegin:command];
     } else {
         if (![command hasPrefix:@"%"] && ![iTermAdvancedSettingsModel tolerateUnrecognizedTmuxCommands]) {
             [delegate_ tmuxPrintLine:@"Unrecognized command from tmux. Did your ssh session die? The command was:"];
@@ -500,31 +522,82 @@ error:
     return encoded;
 }
 
-- (void)sendKeys:(NSData *)data toWindowPane:(int)windowPane
-{
-    // tmux 1.8 has a bug where commands longer than 1024 characters crash the server.
-    // This is the only place I've found where we send such a long command, so split it up into
-    // multiple parts.
-    const int kMaxChunkSize = 180;  // This is safely under the limit.
+- (void)sendKeys:(NSString *)string toWindowPane:(int)windowPane {
+    if ([self serverSupportsUTF8]) {
+        // Send the actual code point of each character.
+        [self sendCodePoints:[string codePoints] toWindowPane:windowPane];
+    } else {
+        // Send each byte of UTF-8 as a separate "keystroke". For tmux 2.1 and earlier.
+        NSData *data = [string dataUsingEncoding:NSUTF8StringEncoding];
+        NSString *temp = [[[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding] autorelease];
+        [self sendCodePoints:[temp codePoints] toWindowPane:windowPane];
+    }
+}
+
+- (NSString *)firstSupplementaryPlaneCharacterInArray:(NSArray<NSNumber *> *)codePoints {
+    NSUInteger index = [codePoints indexOfObjectPassingTest:^BOOL(NSNumber * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
+        return obj.integerValue > 0xffff;
+    }];
+    if (index == NSNotFound) {
+        return nil;
+    } else {
+        UTF32Char c = [codePoints[index] integerValue];
+        return [NSString stringWithLongCharacter:c];
+    }
+}
+
+- (void)sendCodePoints:(NSArray<NSNumber *> *)codePoints toWindowPane:(int)windowPane {
+    if (!codePoints.count) {
+        return;
+    }
+    
+    if (![self serverAcceptsSurrogatePairs]) {
+        NSString *string = [self firstSupplementaryPlaneCharacterInArray:codePoints];
+        if (string) {
+            [delegate_ tmuxCannotSendCharactersInSupplementaryPlanes:string windowPane:windowPane];
+            return;
+        }
+    }
+    
+    // Send multiple small send-keys commands because commands longer than 1024 bytes crash tmux 1.8.
     NSMutableArray *commands = [NSMutableArray array];
-    int offset = 0;
-    while (offset < data.length) {
-        NSRange range = NSMakeRange(offset, MIN(kMaxChunkSize, data.length - offset));
-        offset += range.length;
-        NSString *encoded = [self stringForKeyEncodedData:[data subdataWithRange:range]];
-        NSString *command = [NSString stringWithFormat:@"send-keys -t %%%d %@",
-                             windowPane, encoded];
-        NSDictionary *dict = [self dictionaryForCommand:command
-                                         responseTarget:self
-                                       responseSelector:@selector(noopResponseSelector:)
-                                         responseObject:nil
-                                                  flags:0];
-        [commands addObject:dict];
+    const NSUInteger stride = 80;
+    for (NSUInteger start = 0; start < codePoints.count; start += stride) {
+        NSUInteger length = MIN(stride, codePoints.count - start);
+        NSRange range = NSMakeRange(start, length);
+        NSArray *subarray = [codePoints subarrayWithRange:range];
+        [commands addObject:[self dictionaryForSendKeysCommandWithCodePoints:subarray windowPane:windowPane]];
     }
 
     [delegate_ tmuxSetSecureLogging:YES];
     [self sendCommandList:commands];
     [delegate_ tmuxSetSecureLogging:NO];
+}
+
+- (BOOL)doubleValue:(double)value1 isGreaterOrEqualTo:(double)value2 epsilon:(double)epsilon {
+    return value1 - value2 >= -epsilon;
+}
+
+- (BOOL)serverSupportsUTF8 {
+    return (self.minimumServerVersion != nil &&
+            [self.minimumServerVersion compare:[NSDecimalNumber decimalNumberWithString:@"2.2"]] != NSOrderedAscending);
+}
+
+- (BOOL)serverAcceptsSurrogatePairs {
+    NSDecimalNumber *version2_2 = [NSDecimalNumber decimalNumberWithString:@"2.2"];
+    return !([self.minimumServerVersion isEqual:version2_2] && [self.maximumServerVersion isEqual:version2_2]);
+}
+
+- (NSDictionary *)dictionaryForSendKeysCommandWithCodePoints:(NSArray<NSNumber *> *)codePoints
+                                                  windowPane:(int)windowPane {
+    NSString *command = [NSString stringWithFormat:@"send-keys -t %%%d %@",
+                         windowPane, [codePoints numbersAsHexStrings]];
+    NSDictionary *dict = [self dictionaryForCommand:command
+                                     responseTarget:self
+                                   responseSelector:@selector(noopResponseSelector:)
+                                     responseObject:nil
+                                              flags:0];
+    return dict;
 }
 
 - (void)detach
@@ -585,7 +658,7 @@ error:
                                               flags:flags];
     [self enqueueCommandDict:dict];
     TmuxLog(@"Send command: %@", commandWithNewline);
-    [delegate_ tmuxWriteData:[commandWithNewline dataUsingEncoding:NSUTF8StringEncoding]];
+    [delegate_ tmuxWriteString:commandWithNewline];
     TmuxLog(@"Send command: %@", [dict objectForKey:kCommandString]);
 }
 
@@ -619,7 +692,7 @@ error:
     TmuxLog(@"-- End command list --");
     [cmd appendString:NEWLINE];
     TmuxLog(@"Send command: %@", cmd);
-    [delegate_ tmuxWriteData:[cmd dataUsingEncoding:NSUTF8StringEncoding]];
+    [delegate_ tmuxWriteString:cmd];
 }
 
 - (NSWindowController<iTermWindowController> *)window {

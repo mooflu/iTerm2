@@ -38,6 +38,8 @@ extern NSString *const kUpdateLabelsNotification;
 extern NSString *const kKeyBindingsChangedNotification;
 extern NSString *const kPreferencePanelDidUpdateProfileFields;
 extern NSString *const kSessionProfileDidChange;  // Posted by a session when it changes to update the Get Info window.
+extern NSString *const kPreferencePanelDidLoadNotification;
+extern NSString *const kPreferencePanelWillCloseNotification;
 
 // All profiles should be reloaded.
 extern NSString *const kReloadAllProfiles;
@@ -69,8 +71,14 @@ void LoadPrefsFromCustomFolder(void);
 
 @property(nonatomic, readonly) NSString *currentProfileGuid;
 
+// Returns the window if the pref panel is loaded or nil if not.
+@property(nonatomic, readonly) NSWindow *windowIfLoaded;
+
 + (instancetype)sharedInstance;
 + (instancetype)sessionsInstance;
+
+- (instancetype)initWithProfileModel:(ProfileModel *)model
+              editCurrentSessionMode:(BOOL)editCurrentSessionMode;
 
 - (void)openToProfileWithGuid:(NSString*)guid selectGeneralTab:(BOOL)selectGeneralTab;
 
@@ -92,6 +100,7 @@ void LoadPrefsFromCustomFolder(void);
 - (void)changeFont:(id)fontManager;
 - (void)selectProfilesTab;
 
-- (BOOL)importColorPresetFromFile:(NSString*)filename;
+// Go to the profiles tab, go to its Keys sub-tab, and open the Hotkey window panel.
+- (void)configureHotkeyForProfile:(Profile *)profile;
 
 @end

@@ -14,6 +14,8 @@
 #define PtyTaskDebugLog(args...)
 
 NSString *const kTaskNotifierDidSpin = @"kTaskNotifierDidSpin";
+static int unblockPipeR;
+static int unblockPipeW;
 
 @implementation TaskNotifier
 {
@@ -26,8 +28,6 @@ NSString *const kTaskNotifierDidSpin = @"kTaskNotifierDidSpin";
 
     // A set of NSNumber*s holding pids of tasks that need to be wait()ed on
     NSMutableSet* deadpool;
-    int unblockPipeR;
-    int unblockPipeW;
 }
 
 
@@ -104,7 +104,7 @@ NSString *const kTaskNotifierDidSpin = @"kTaskNotifierDidSpin";
     PtyTaskDebugLog(@"Add %d to deadpool", [task pid]);
     pid_t pid = task.pid;
     if (pid != -1 && task.pidIsChild) {
-        // Not a restored task.
+        // Not a task running in a server.
         [deadpool addObject:@([task pid])];
     } else if (task.serverPid != -1 && !task.pidIsChild) {
         // Prevent server from becoming a zombie.
@@ -135,6 +135,10 @@ NSString *const kTaskNotifierDidSpin = @"kTaskNotifierDidSpin";
 
 - (void)unblock
 {
+    UnblockTaskNotifier();
+}
+
+void UnblockTaskNotifier(void) {
     // This is called in a signal handler and must only call functions listed
     // as safe in sigaction(2)'s man page.
     char dummy = 0;
@@ -385,7 +389,7 @@ NSString *const kTaskNotifierDidSpin = @"kTaskNotifierDidSpin";
                     PtyTaskDebugLog(@"Duplicate fd %d", fd);
                     continue;
                 }
-                [task retain];
+                [[task retain] autorelease];
                 [handledFds addObject:@(fd)];
 
                 if ([self handleReadOnFileDescriptor:fd task:task fdSet:&rfds]) {
@@ -430,7 +434,6 @@ NSString *const kTaskNotifierDidSpin = @"kTaskNotifierDidSpin";
                         }
                     }
                 }
-                [task release];
             }
         }
 

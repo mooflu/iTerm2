@@ -95,7 +95,7 @@
         // it results in drawing errors (drawing is clipped to the findbar for
         // some reason). So we return YES and continueFind is run from a timer
         // and everything works fine. The 100ms delay introduced is not
-        // noticable.
+        // noticeable.
     } else {
         // Begin a brand new search.
         if (_findInProgress) {
@@ -270,7 +270,7 @@
         }
     }
     BOOL found = NO;
-    VT100GridCoordRange selectedRange;
+    VT100GridCoordRange selectedRange = VT100GridCoordRangeMake(0, 0, 0, 0);
     int i = start;
     for (int j = 0; !found && j < [_searchResults count]; j++) {
         SearchResult* r = [_searchResults objectAtIndex:i];

@@ -40,13 +40,11 @@ extern NSString *const kProfileSessionNameDidEndEditing;
 - (void)selectGeneralTab;
 
 - (void)openToProfileWithGuid:(NSString *)guid selectGeneralTab:(BOOL)selectGeneralTab;
-
-- (BOOL)importColorPresetFromFile:(NSString*)filename;
+- (void)openToProfileWithGuidAndEditHotKey:(NSString *)guid;
 
 // Update views for changed backing state.
 - (void)refresh;
 
 - (void)resizeWindowForCurrentTab;
-- (void)windowWillClose:(NSNotification *)notification;
 
 @end
